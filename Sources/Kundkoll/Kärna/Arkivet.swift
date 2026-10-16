@@ -1366,6 +1366,10 @@ extension Arkivet {
             }
         }
         cache.glömAllt()
+        // Fram till omstarten pekar allt i den här körningen på den gamla
+        // mappen. Med kunderna kvar i listan hämtade mejlen och indexet
+        // sig till de gamla sökvägarna och återskapade kunden där.
+        kunder = []
     }
 
     /// Flyttar kunden med allt innehåll till papperskorgen.

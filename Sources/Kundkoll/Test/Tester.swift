@@ -1369,6 +1369,8 @@ enum Tester {
             fm.createFile(atPath: index.path, contents: Data("x".utf8))
 
             try! arkiv.flyttaKunder(till: iValvet)
+            Prov.lika(arkiv.kunder.count, 0,
+                      "fram till omstarten listar arkivet inga kunder i den gamla mappen")
             let ny = Arkivet(rot: iValvet)
             let flyttad = ny.kunder.first { $0.namn == "Acme" }
             Prov.kolla(flyttad != nil && !fm.fileExists(atPath: kund.mapp.path), "kunden flyttas")

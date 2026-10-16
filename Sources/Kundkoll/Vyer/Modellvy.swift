@@ -469,8 +469,12 @@ struct Modellvy: View {
         panel.prompt = "Välj"
         panel.message = "Välj kundmappen — varje mapp i den blir en kund. Ligger den i ett "
             + "Obsidian-valv blir kunderna mappar i valvet."
-        guard panel.runModal() == .OK, let ny = panel.url else { return }
+        guard panel.runModal() == .OK, var ny = panel.url else { return }
         let arkiv = Arkivet.shared
+        // Själva valvet går inte — varje mapp i det skulle bli en kund. Det
+        // som menas är nästan alltid en egen mapp för kunderna i valvet.
+        let iNyMapp = Obsidian.ärValv(ny)
+        if iNyMapp { ny = ny.appending(path: "Kunder") }
 
         if let invändning = Arkivet.invändning(mot: ny, nuvarande: arkiv.rot) {
             let ruta = NSAlert()
@@ -485,6 +489,10 @@ struct Modellvy: View {
             ? "Kunden flyttas med allt innehåll — inspelningar, anteckningar, mejl och uppgifter. "
             : "De \(antal) kunderna flyttas med allt innehåll — inspelningar, anteckningar, "
                 + "mejl och uppgifter. "
+        if iNyMapp {
+            text += "De läggs i en ny mapp, Kunder, i valvet — varje mapp i kundmappen "
+                + "blir en kund, så den kan inte vara valvet självt. "
+        }
         if let valv = Obsidian.valvrot(ovanför: ny) {
             text += "Mappen ligger i valvet \(valv.lastPathComponent): kundernas egna "
                 + ".obsidian-mappar läggs i papperskorgen och kunderna tas ur Obsidians valvlista.\n\n"
@@ -495,7 +503,9 @@ struct Modellvy: View {
         text += "Sökindexet byggs om, och appen startas om efteråt."
 
         let ruta = NSAlert()
-        ruta.messageText = "Flytta kunderna till \(ny.lastPathComponent)?"
+        ruta.messageText = iNyMapp
+            ? "Flytta kunderna till \(ny.deletingLastPathComponent().lastPathComponent)/Kunder?"
+            : "Flytta kunderna till \(ny.lastPathComponent)?"
         ruta.informativeText = text
         ruta.addButton(withTitle: "Flytta och starta om")
         ruta.addButton(withTitle: "Avbryt")
@@ -517,6 +527,7 @@ struct Modellvy: View {
         let förvald = Arkivet.kanonisk(Arkivet.förvaldRot.path)
         Inställningar.kundmapp = Arkivet.kanonisk(ny.path) == förvald ? nil : ny.path
         Inställningar.packaLjud = packaLjud
+        stäng()
         Omstart.nu()
     }
 
@@ -740,9 +751,16 @@ struct Modellvy: View {
 /// Startar om appen, efter ett byte av kundmapp: arkivet läser sin rot en
 /// gång per körning. Körd från kommandoraden finns inget paket att öppna,
 /// och då avslutas den bara.
+///
+/// Anropat direkt ur inställningsbladet avslutades appen inte alls — den
+/// körde vidare mot den gamla kundmappen. Bladen stängs därför först och
+/// avslutet sker på nästa varv, och blir appen ändå kvar säger den till.
 enum Omstart {
     @MainActor
     static func nu() {
+        for fönster in NSApp.windows {
+            if let blad = fönster.attachedSheet { fönster.endSheet(blad) }
+        }
         let paket = Bundle.main.bundlePath
         if paket.hasSuffix(".app") {
             let p = Process()
@@ -753,6 +771,16 @@ enum Omstart {
                            + "/usr/bin/open \"$0\"", paket, String(getpid())]
             try? p.run()
         }
-        NSApp.terminate(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            NSApp.terminate(nil)
+        }
+        // Avslutet väntar in städningen, högst en halv minut.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 40) {
+            let ruta = NSAlert()
+            ruta.messageText = "Avsluta appen med ⌘Q"
+            ruta.informativeText = "Kundmappen är bytt, men appen kunde inte starta om sig själv. "
+                + "Avsluta den och öppna den igen — tills dess visar den inga kunder."
+            ruta.runModal()
+        }
     }
 }
