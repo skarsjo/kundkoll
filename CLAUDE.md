@@ -43,8 +43,8 @@ Binärens väg beror på SwiftPM-versionen: README säger
 
 - `Kärna/` — modell och tjänster. `Arkivet` (singleton, `@MainActor`) äger
   kunder/projekt/möten. **Filsystemet är sanningen**, ingen databas: varje kund
-  är en Obsidian-vault under `~/Documents/Kunder`, mötet lagras som `möte.json`
-  + wav-spår, och `Filbevakare` plockar upp ändringar gjorda i Finder/Obsidian.
+  är en Obsidian-vault under kundmappen (eller en mapp i användarens valv), mötet
+  lagras som `möte.json` + ljudspår, och `Filbevakare` plockar upp ändringar gjorda i Finder/Obsidian.
   Genererade filer (`Transkript.md`, `Att göra.md`, `Läget.md`, `Tid.md`,
   `Mail.md`) bär `genererad: kundkoll` och skrivs om helt; anteckningar och
   kontaktnoters brödtext är användarens och får aldrig skrivas över.
@@ -53,6 +53,16 @@ Binärens väg beror på SwiftPM-versionen: README säger
   (`Tystnadsfilter` stoppar tysta fönster så whisper inte hallucinerar), och
   `Efterbearbetning` efter mötet: arkivpass med större modell → röstanalys →
   sammanfattning → uppgifter. `Importkö` kör jobben och överlever omstart.
+- Ljudet på disk: `Ljudlagring`. Spåren är wav under inspelning och
+  efterbearbetning och packas sedan till m4a. Allt som läser ljudet (whisper,
+  `rostanalys.py`, omkörning, `grupperaOm`) kör `packaUpp` först och
+  `packaIhop` efteråt — m4a är sanningen och skrivs aldrig om. Använd
+  `Ljudlagring.fil`/`harLjud` i stället för att leta efter `motpart.wav`.
+- Kundmappen: `Arkivet.standardrot` (KUNDKOLL_ROT > inställningen
+  `kundmapp` > `~/Documents/Kunder`), fast för en körning. Ligger den i ett
+  Obsidian-valv är `Arkivet.huvudvalv` satt: inga valv per kund, och
+  `Obsidian.öppna` går till huvudvalvet. `flyttaKunder` och `döpOm` delar
+  `skrivOmSökvägar` för det som bär absoluta sökvägar.
 - Externa processer startas via `Underprocess`: whisper.cpp
   (`~/Projekt/whisper.cpp`), MLX-whisper, och `scripts/rostanalys.py` (pyannote
   + speechbrain i Pythonmiljön `~/Projekt/transcriber/venv`) för diarisering

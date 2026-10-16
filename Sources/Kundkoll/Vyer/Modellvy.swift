@@ -17,13 +17,14 @@ struct Modellvy: View {
     @Environment(\.dismiss) private var stäng
 
     enum Flik: String, CaseIterable, Identifiable {
-        case modell, transkribering, röster, diagnos
+        case modell, transkribering, röster, lagring, diagnos
         var id: String { rawValue }
         var namn: String {
             switch self {
             case .modell: "Modell"
             case .transkribering: "Transkribering"
             case .röster: "Röster och insikter"
+            case .lagring: "Lagring"
             case .diagnos: "Diagnos"
             }
         }
@@ -43,6 +44,10 @@ struct Modellvy: View {
     @State private var harElevenNyckel = Nyckelring.hämta("kundkoll-elevenlabs") != nil
     @State private var whisperRot = Inställningar.whisperRot ?? ""
     @State private var pythonMiljö = Inställningar.pythonMiljö ?? ""
+    @State private var packaLjud = Inställningar.packaLjud
+    @State private var packar = false
+    @State private var packläge = ""
+    @State private var packresultat: String?
     @State private var diagnos: [Diagnosrad] = []
     @State private var kontrollerar = false
 
@@ -77,6 +82,7 @@ struct Modellvy: View {
                     case .modell: modellflik
                     case .transkribering: transkriberingsflik
                     case .röster: röstflik
+                    case .lagring: lagringsflik
                     case .diagnos: diagnosflik
                     }
                 }
@@ -376,6 +382,168 @@ struct Modellvy: View {
         }
     }
 
+    // MARK: - Lagring
+
+    /// Kundmappen och ljudet byts inte mitt i ett möte eller en bearbetning:
+    /// båda läser och skriver i mötesmapparna.
+    private var lagringenLedig: Bool {
+        !Inspelningssession.delad.pågår
+            && Importkö.delad.aktuell == nil && Importkö.delad.väntande.isEmpty
+    }
+
+    @ViewBuilder
+    private var lagringsflik: some View {
+        fält("Kundmapp") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(Arkivet.shared.rot.path.replacingOccurrences(
+                        of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                if let valv = Arkivet.shared.huvudvalv {
+                    Label("Ligger i Obsidian-valvet \(valv.lastPathComponent). Kunderna är mappar "
+                          + "i det valvet och länkas ihop med resten av dina anteckningar.",
+                          systemImage: "checkmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("Varje kund är ett eget Obsidian-valv. Väljer du en mapp i ditt vanliga "
+                         + "valv blir kunderna mappar där i stället — och följer med när valvet "
+                         + "synkas.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if Arkivet.miljörot != nil {
+                    Label("Styrs av miljövariabeln KUNDKOLL_ROT.", systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    HStack(spacing: 8) {
+                        Button("Byt kundmapp …", action: väljKundmapp)
+                            .disabled(!lagringenLedig)
+                        if !lagringenLedig {
+                            Text("Inte medan en inspelning eller bearbetning pågår.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+
+        Divider().padding(.vertical, 4)
+
+        fält("Ljud") {
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Packa ljudet till m4a när mötet är klart", isOn: $packaLjud)
+                Text("Spåren spelas in som wav, som tål en krasch mitt i och är vad whisper "
+                     + "läser. När efterbearbetningen är klar packas de till AAC, runt åtta "
+                     + "gånger mindre: ett entimmesmöte med två spår går från 230 MB till under "
+                     + "30 MB. Behövs ljudet igen packas det upp medan arbetet pågår. Uppmätt "
+                     + "påverkas röstavtrycken inte märkbart.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button("Packa befintliga möten", action: packaBefintliga)
+                        .disabled(packar || !lagringenLedig)
+                    if packar {
+                        ProgressView().controlSize(.small)
+                        Text(packläge).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if let packresultat {
+                    Text(packresultat).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func väljKundmapp() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Välj"
+        panel.message = "Välj kundmappen — varje mapp i den blir en kund. Ligger den i ett "
+            + "Obsidian-valv blir kunderna mappar i valvet."
+        guard panel.runModal() == .OK, let ny = panel.url else { return }
+        let arkiv = Arkivet.shared
+
+        if let invändning = Arkivet.invändning(mot: ny, nuvarande: arkiv.rot) {
+            let ruta = NSAlert()
+            ruta.messageText = "Den mappen går inte att använda"
+            ruta.informativeText = invändning
+            ruta.runModal()
+            return
+        }
+
+        let antal = arkiv.kunder.count
+        var text = antal == 1
+            ? "Kunden flyttas med allt innehåll — inspelningar, anteckningar, mejl och uppgifter. "
+            : "De \(antal) kunderna flyttas med allt innehåll — inspelningar, anteckningar, "
+                + "mejl och uppgifter. "
+        if let valv = Obsidian.valvrot(ovanför: ny) {
+            text += "Mappen ligger i valvet \(valv.lastPathComponent): kundernas egna "
+                + ".obsidian-mappar läggs i papperskorgen och kunderna tas ur Obsidians valvlista.\n\n"
+                + "Synkas valvet: packa ljudet först, så tar ett möte runt 15 MB per timme och spår "
+                + "i stället för 115. Och kör inte appen på två datorer mot samma kundmapp — båda "
+                + "skriver om de genererade filerna.\n\n"
+        }
+        text += "Sökindexet byggs om, och appen startas om efteråt."
+
+        let ruta = NSAlert()
+        ruta.messageText = "Flytta kunderna till \(ny.lastPathComponent)?"
+        ruta.informativeText = text
+        ruta.addButton(withTitle: "Flytta och starta om")
+        ruta.addButton(withTitle: "Avbryt")
+        ruta.addButton(withTitle: "Byt utan att flytta")
+        let svar = ruta.runModal()
+        guard svar != .alertSecondButtonReturn else { return }
+
+        if svar == .alertFirstButtonReturn {
+            do {
+                try arkiv.flyttaKunder(till: ny)
+            } catch {
+                let fel = NSAlert()
+                fel.messageText = "Kunderna kunde inte flyttas"
+                fel.informativeText = error.localizedDescription
+                fel.runModal()
+                return
+            }
+        }
+        let förvald = Arkivet.kanonisk(Arkivet.förvaldRot.path)
+        Inställningar.kundmapp = Arkivet.kanonisk(ny.path) == förvald ? nil : ny.path
+        Inställningar.packaLjud = packaLjud
+        Omstart.nu()
+    }
+
+    private func packaBefintliga() {
+        packar = true
+        packresultat = nil
+        Task {
+            let arkiv = Arkivet.shared
+            let mappar = arkiv.kunder
+                .flatMap { arkiv.inspelningar(för: $0).map(\.1) }
+                .filter { !Importkö.delad.gäller($0) }
+            var möten = 0
+            var frigjort: Int64 = 0
+            for (n, mapp) in mappar.enumerated() {
+                packläge = "\(n + 1) av \(mappar.count)"
+                let f = await Ljudlagring.packaIhop(i: mapp, packa: true)
+                if f > 0 { möten += 1; frigjort += f }
+            }
+            packresultat = möten == 0
+                ? "Inget att packa — allt ljud är redan m4a."
+                : "\(möten) möten packade, "
+                    + ByteCountFormatter.string(fromByteCount: frigjort, countStyle: .file)
+                    + " frigjort."
+            packar = false
+        }
+    }
+
     // MARK: - Diagnos
 
     @ViewBuilder
@@ -544,6 +712,7 @@ struct Modellvy: View {
         Inställningar.automatiskaModellanrop = automatiska
         Inställningar.whisperRot = whisperRot
         Inställningar.pythonMiljö = pythonMiljö
+        Inställningar.packaLjud = packaLjud
         stäng()
     }
 
@@ -565,5 +734,25 @@ struct Modellvy: View {
             }
             provar = false
         }
+    }
+}
+
+/// Startar om appen, efter ett byte av kundmapp: arkivet läser sin rot en
+/// gång per körning. Körd från kommandoraden finns inget paket att öppna,
+/// och då avslutas den bara.
+enum Omstart {
+    @MainActor
+    static func nu() {
+        let paket = Bundle.main.bundlePath
+        if paket.hasSuffix(".app") {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            // Vänta tills den här instansen är borta; annars aktiverar open
+            // bara den som håller på att avslutas.
+            p.arguments = ["-c", "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.2; done; "
+                           + "/usr/bin/open \"$0\"", paket, String(getpid())]
+            try? p.run()
+        }
+        NSApp.terminate(nil)
     }
 }

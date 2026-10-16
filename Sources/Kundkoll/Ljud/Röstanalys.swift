@@ -621,10 +621,11 @@ extension Röstanalys {
     func lärIn(_ inspelning: Inspelning, mapp: URL, kund: Kund,
                arkiv: Arkivet) async -> [String] {
         let fil = mapp.appending(path: "motpart.wav")
-        guard FileManager.default.fileExists(atPath: fil.path) else {
+        guard Ljudlagring.fil("motpart", i: mapp) != nil else {
             return Array(Set(inspelning.röstnamn.values))
         }
         var misslyckade: [String] = []
+        var packadeUpp = false
         for (grupp, personnamn) in inspelning.röstnamn {
             // Avtrycket från uppdelningen finns oftast sparat med mötet; då
             // behövs ingen Python alls.
@@ -638,6 +639,11 @@ extension Röstanalys {
             }
             let rader = inspelning.yttranden.filter { $0.röstgrupp == grupp }
             let turer = Self.turer(av: rader)
+            // Ljudet packas upp först när ett avtryck verkligen måste räknas.
+            if !packadeUpp, !FileManager.default.fileExists(atPath: fil.path) {
+                try? await Ljudlagring.packaUpp(i: mapp)
+                packadeUpp = true
+            }
             guard let par = try? await avtryck(fil: fil, turer: turer),
                   let bästa = par.map(\.1).max(by: { $0.sekunder < $1.sekunder }),
                   bästa.sekunder >= Tröskel.minstaProfilLängd else {
@@ -649,6 +655,7 @@ extension Röstanalys {
             }
             if !lyckades { misslyckade.append(personnamn) }
         }
+        if packadeUpp { await Ljudlagring.packaIhop(i: mapp, packa: false) }
         return misslyckade
     }
 }

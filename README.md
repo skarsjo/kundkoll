@@ -37,6 +37,11 @@ deltagare finns i mötet, och mikrofonen är den som användes sist.
 Stängs inspelningsfönstret fortsätter inspelningen; «Visa» på raden längst
 ned öppnar det igen. ⌘Q mitt i ett möte stoppar och sparar först, och
 wav-filerna skrivs så att de är läsbara även om appen skulle falla mitt i.
+När mötet är färdigbearbetat packas spåren till m4a (AAC, 32 kbit/s) — runt
+åtta gånger mindre, utan märkbar skillnad för röstigenkänningen. Behövs ljudet
+igen, vid en omkörning eller ny röstuppdelning, packas det upp medan arbetet
+pågår. Det går att stänga av under ⌘, → Lagring, och där packas äldre möten
+med en knapp.
 
 ## Så fungerar inspelningen
 
@@ -264,7 +269,8 @@ den. Bilder går också att klistra in eller dra och släppa.
 
 ## Data
 
-Allt hamnar under `~/Documents/Kunder`, en Obsidian-vault per kund:
+Allt hamnar i kundmappen, som standard `~/Documents/Kunder` med en
+Obsidian-vault per kund:
 
 ```
 ~/Documents/Kunder/
@@ -279,8 +285,8 @@ Allt hamnar under `~/Documents/Kunder`, en Obsidian-vault per kund:
         Anteckningar/
     Samtal/
       2026-08-31 0930 Avstämning/
-        jag.wav          16 kHz mono, ditt spår
-        motpart.wav      16 kHz mono, motpartens spår
+        jag.m4a          16 kHz mono, ditt spår (wav tills mötet är bearbetat)
+        motpart.m4a      16 kHz mono, motpartens spår
         möte.json        metadata, transkript och vem som talar
         Transkript.md    det Obsidian visar, med wikilänkar
     Kontakter/
@@ -291,6 +297,13 @@ Allt hamnar under `~/Documents/Kunder`, en Obsidian-vault per kund:
     Mail/
     Anteckningar/
 ```
+
+Kundmappen kan flyttas under ⌘, → Lagring, till exempel in i ditt vanliga
+Obsidian-valv. Ligger den i ett valv blir kunderna vanliga mappar där i stället
+för egna valv: de syns och länkas ihop med resten av dina anteckningar och
+följer med när valvet synkas. Flytten tar med allt och skriver om det som bär
+sökvägar; sökindexet byggs om och appen startas om. Kör inte appen på två
+datorer mot samma synkade kundmapp — båda skriver om de genererade filerna.
 
 Filsystemet är sanningen — ingen databas. En kund eller ett projekt som skapas
 för hand i Finder eller Obsidian dyker upp i appen utan vidare: mappen
@@ -371,7 +384,7 @@ fönstret först, gör flera försök, och faller tillbaka på hela skärmen.
 
 ```bash
 ./scripts/bygg-app.sh                                        # dist/Bjarbys kundkoll.app
-.build/arm64-apple-macosx/debug/Kundkoll --test              # 658 enhetstester
+.build/arm64-apple-macosx/debug/Kundkoll --test              # 702 enhetstester
 .build/arm64-apple-macosx/debug/Kundkoll --prov-ljud f.wav   # hela kedjan skarpt
 .build/arm64-apple-macosx/debug/Kundkoll --prov-röst ljud.wav w.json facit.json
 .build/arm64-apple-macosx/debug/Kundkoll --prov-import fil.mp4 fil.m4a

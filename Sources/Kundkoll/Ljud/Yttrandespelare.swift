@@ -25,11 +25,11 @@ final class Yttrandespelare: ObservableObject {
     private var startade = Date.distantPast
 
     /// Vilka spår ett möte har. Tvåspåriga inspelningar har mitt ljud för
-    /// sig; i en importerad fil ligger alla röster i motpart.wav.
+    /// sig; i en importerad fil ligger alla röster i motpart. Ett färdigt
+    /// möte har spåren som m4a, ett nytt som wav — se `Ljudlagring`.
     static func spår(i mapp: URL, enspårig: Bool) -> [URL] {
-        let namn = enspårig ? ["motpart.wav"] : ["jag.wav", "motpart.wav"]
-        return namn.map { mapp.appending(path: $0) }
-            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        let namn = enspårig ? ["motpart"] : ["jag", "motpart"]
+        return namn.compactMap { Ljudlagring.fil($0, i: mapp) }
     }
 
     /// Öppnar mötets spår. Anropas när vyn visas och när mötet byts.

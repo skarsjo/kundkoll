@@ -158,6 +158,7 @@ actor Import {
                  språk: String? = "sv",
                  vidLäge: @Sendable @escaping (Läge) -> Void) async throws -> Inspelning {
         let fm = FileManager.default
+        try await Ljudlagring.packaUpp(i: mapp)
         let jag = mapp.appending(path: "jag.wav")
         let motpart = mapp.appending(path: "motpart.wav")
         guard fm.fileExists(atPath: motpart.path) || fm.fileExists(atPath: jag.path) else {

@@ -62,6 +62,8 @@ enum Efterbearbetning {
                     språk: String?, väntadeRöster: Int? = nil,
                     vidLäge: @Sendable @escaping (Läge) -> Void) async throws -> Inspelning {
         let fm = FileManager.default
+        // Ett färdigt möte har sitt ljud som m4a; passet läser wav.
+        try await Ljudlagring.packaUpp(i: mapp)
         let jag = mapp.appending(path: "jag.wav")
         let motpart = mapp.appending(path: "motpart.wav")
         var spår: [(Röst, URL)] = []
@@ -124,6 +126,9 @@ enum Efterbearbetning {
             i.bearbetas = false
             i.arkivfel = error is CancellationError ? "Avbrutet." : error.localizedDescription
             try? await spara(i, i: mapp)
+            // Bara uppackningar städas; ett nytt möte behåller sin wav
+            // tills passet gått igenom.
+            await Ljudlagring.packaIhop(i: mapp, packa: false)
             throw error
         }
 
@@ -149,6 +154,7 @@ enum Efterbearbetning {
                 Uppgiftssamling.frånMöte(s, inspelning: klar, mapp: mapp)
             }
         }
+        await Ljudlagring.packaIhop(i: mapp)
         return klar
     }
 

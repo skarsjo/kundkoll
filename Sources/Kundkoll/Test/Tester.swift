@@ -7,10 +7,12 @@ enum Tester {
 
     static func kör() -> Int32 {
         arkivet()
+        kundmappen()
         robusthet()
         personfilter()
         tystnadsfiltret()
         ljud()
+        ljudlagring()
         whisper()
         liveinsikter()
         mötesuppgifter()
@@ -1313,6 +1315,88 @@ enum Tester {
 
     // MARK: - Arkivet
 
+    // MARK: - Kundmappen
+
+    static func kundmappen() {
+        Prov.svit("Kundmappen")
+        let fm = FileManager.default
+        let bas = fm.temporaryDirectory.appending(path: "kundkoll-test-\(UUID().uuidString)")
+        defer { try? fm.removeItem(at: bas) }
+        let valv = bas.appending(path: "Valv")
+        try! fm.createDirectory(at: valv.appending(path: ".obsidian"), withIntermediateDirectories: true)
+        let iValvet = valv.appending(path: "Kunder")
+        let utanför = bas.appending(path: "Kunder")
+
+        do {   // vilka mappar som duger
+            let nu = bas.appending(path: "Nu")
+            Prov.kolla(Arkivet.invändning(mot: nu, nuvarande: nu) != nil, "samma mapp är ingen flytt")
+            Prov.kolla(Arkivet.invändning(mot: nu.appending(path: "Under"), nuvarande: nu) != nil,
+                       "kundmappen kan inte flyttas in i sig själv")
+            Prov.kolla(Arkivet.invändning(mot: bas, nuvarande: nu) != nil,
+                       "en mapp ovanför den nuvarande duger inte — allt där vore kunder")
+            Prov.kolla(Arkivet.invändning(mot: valv, nuvarande: nu) != nil,
+                       "själva valvet duger inte — varje mapp i det vore en kund")
+            Prov.lika(Arkivet.invändning(mot: iValvet, nuvarande: nu), nil, "en mapp i valvet duger")
+            Prov.lika(Obsidian.valvrot(ovanför: iValvet)?.standardizedFileURL.path,
+                      valv.standardizedFileURL.path, "valvet ovanför kundmappen hittas")
+            Prov.lika(Obsidian.valvrot(ovanför: valv), nil, "valvet själv ligger inte i något valv")
+        }
+
+        do {   // kunderna blir egna valv, eller mappar i ett valv
+            let arkiv = Arkivet(rot: utanför)
+            Prov.lika(arkiv.huvudvalv, nil, "utanför ett valv finns inget huvudvalv")
+            let kund = try! arkiv.skapaKund(namn: "Acme")
+            Prov.kolla(Obsidian.ärValv(kund.mapp), "en kund utanför ett valv blir ett eget valv")
+
+            let iValv = Arkivet(rot: iValvet)
+            Prov.kolla(iValv.huvudvalv != nil, "i ett valv känns huvudvalvet igen")
+            let inne = try! iValv.skapaKund(namn: "Beta")
+            Prov.kolla(!Obsidian.ärValv(inne.mapp), "en kund i ett valv blir en vanlig mapp")
+            try! fm.removeItem(at: inne.mapp)
+        }
+
+        do {   // flytten drar med sig allt som bär sökvägar
+            let arkiv = Arkivet(rot: utanför)
+            let kund = arkiv.kunder.first { $0.namn == "Acme" }!
+            let mapp = try! arkiv.nyInspelningsmapp(placering: .kund(kund), titel: "Uppstart", datum: Date())
+            try! arkiv.spara(Inspelning(titel: "Uppstart", inledd: Date(), längd: 5, kund: "Acme",
+                                        projekt: nil, mikrofon: nil, liveYttranden: [],
+                                        arkivYttranden: nil), i: mapp)
+            try! arkiv.läggTill([Uppgift(vad: "Skicka offerten", ursprung: .möte, källa: mapp.path,
+                                         källtitel: "Uppstart", projekt: nil)], för: kund)
+            let index = kund.mapp.appending(path: ".kundkoll/index.db")
+            try! fm.createDirectory(at: index.deletingLastPathComponent(), withIntermediateDirectories: true)
+            fm.createFile(atPath: index.path, contents: Data("x".utf8))
+
+            try! arkiv.flyttaKunder(till: iValvet)
+            let ny = Arkivet(rot: iValvet)
+            let flyttad = ny.kunder.first { $0.namn == "Acme" }
+            Prov.kolla(flyttad != nil && !fm.fileExists(atPath: kund.mapp.path), "kunden flyttas")
+            if let flyttad {
+                Prov.lika(ny.inspelningar(för: flyttad).count, 1, "med sina möten")
+                Prov.kolla(ny.uppgifter(för: flyttad).first?.källa
+                               .map { Arkivet.ligger($0, i: flyttad.mapp) } == true,
+                           "uppgiftens källa pekar in i den nya mappen")
+                Prov.kolla(!fm.fileExists(atPath: flyttad.mapp.appending(path: ".kundkoll/index.db").path),
+                           "sökindexet med de gamla sökvägarna byggs om")
+                Prov.kolla(!Obsidian.ärValv(flyttad.mapp), "i valvet är kunden inte längre ett eget valv")
+            }
+
+            // En krock flyttar ingenting.
+            try! fm.createDirectory(at: utanför.appending(path: "Acme"), withIntermediateDirectories: true)
+            var föll = false
+            do { try ny.flyttaKunder(till: utanför) } catch { föll = true }
+            Prov.kolla(föll, "finns kunden redan i den nya mappen avbryts flytten")
+            Prov.kolla(flyttad.map { fm.fileExists(atPath: $0.mapp.path) } == true, "och inget har flyttats")
+            try! fm.removeItem(at: utanför.appending(path: "Acme"))
+
+            try! ny.flyttaKunder(till: utanför)
+            let tillbaka = Arkivet(rot: utanför).kunder.first { $0.namn == "Acme" }
+            Prov.kolla(tillbaka.map { Obsidian.ärValv($0.mapp) } == true,
+                       "flyttad ut ur valvet blir kunden ett eget valv igen")
+        }
+    }
+
     private static func tillfälligt() -> (Arkivet, URL) {
         let rot = FileManager.default.temporaryDirectory
             .appending(path: "kundkoll-test-\(UUID().uuidString)")
@@ -1693,6 +1777,111 @@ enum Tester {
             // Fem sekunder in ska ge fem sekunder ut, på en bråkdel av en sekund när.
             Prov.kolla(abs(summa - 5 * 16_000) < 1_100,
                        "48 kHz stereo blir 16 kHz mono utan att ljud tappas (\(summa) av 80 000 prov)")
+        }
+    }
+
+
+    // MARK: - Ljudlagring
+
+    /// Kör ett asynkront arbete till slut. Sviten är synkron och går på
+    /// huvudaktören, så arbetet får en egen tråd att köra på.
+    private static func vänta<T>(_ arbete: @escaping @Sendable () async -> T) -> T {
+        let sem = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var ut: T?
+        Task.detached { ut = await arbete(); sem.signal() }
+        sem.wait()
+        return ut!
+    }
+
+    /// Första provet som hörs, i sekunder.
+    private static func början(av fil: URL) -> Double? {
+        guard let f = try? AVAudioFile(forReading: fil),
+              let b = AVAudioPCMBuffer(pcmFormat: f.processingFormat,
+                                       frameCapacity: AVAudioFrameCount(f.length)),
+              (try? f.read(into: b)) != nil, let kanal = b.floatChannelData?[0] else { return nil }
+        for i in 0..<Int(b.frameLength) where abs(kanal[i]) > 0.1 {
+            return Double(i) / f.processingFormat.sampleRate
+        }
+        return nil
+    }
+
+    static func ljudlagring() {
+        Prov.svit("Ljudlagring")
+        let fm = FileManager.default
+
+        // Tio sekunder tystnad med en ton från 3,0 s, så att både längd och
+        // läge går att jämföra efter rundturen.
+        let frekvens = Ljudbuffring.målfrekvens
+        let prov: [Float] = (0..<Int(10 * frekvens)).map { i in
+            let t = Double(i) / frekvens
+            return (3.0..<4.0).contains(t) || (7.0..<7.5).contains(t)
+                ? Float(0.5 * sin(2 * .pi * 440 * t)) : 0
+        }
+        let inspelad = Date(timeIntervalSince1970: 1_767_225_600)   // 2026-01-01
+
+        do {   // packa ihop, packa upp, packa ihop igen
+            let mapp = fm.temporaryDirectory.appending(path: "kundkoll-test-\(UUID().uuidString)")
+            defer { try? fm.removeItem(at: mapp) }
+            try! fm.createDirectory(at: mapp, withIntermediateDirectories: true)
+            let wav = mapp.appending(path: "motpart.wav")
+            let m4a = mapp.appending(path: "motpart.m4a")
+            try! Wav.data(av: prov).write(to: wav)
+            try! fm.setAttributes([.modificationDate: inspelad], ofItemAtPath: wav.path)
+            let wavStorlek = (try? wav.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+
+            let frigjort = vänta { await Ljudlagring.packaIhop(i: mapp, packa: true) }
+            Prov.kolla(fm.fileExists(atPath: m4a.path), "spåret packas till m4a")
+            Prov.kolla(!fm.fileExists(atPath: wav.path), "och wav-filen tas bort")
+            let m4aStorlek = (try? m4a.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? .max
+            Prov.kolla(m4aStorlek * 4 < wavStorlek, "m4a är mycket mindre (\(m4aStorlek) mot \(wavStorlek) byte)")
+            Prov.kolla(frigjort > 0, "frigjort utrymme räknas (\(frigjort) byte)")
+            Prov.lika(try? m4a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+                      inspelad, "inspelningens datum följer med till m4a")
+            Prov.kolla(Ljudlagring.harLjud(i: mapp), "en packad mapp har ljud")
+            Prov.lika(Yttrandespelare.spår(i: mapp, enspårig: true).map(\.lastPathComponent),
+                      ["motpart.m4a"], "spelaren hittar m4a-spåret")
+            let tillfälliga = (try? fm.contentsOfDirectory(atPath: mapp.path))?
+                .filter { $0.hasPrefix(".") } ?? []
+            Prov.lika(tillfälliga, [], "inga tillfälliga filer blir kvar")
+
+            let packad = (try? m4a.resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate
+            let packades = vänta { (try? await Ljudlagring.packaUpp(i: mapp)) != nil }
+            Prov.kolla(packades && fm.fileExists(atPath: wav.path), "ett packat spår går att packa upp till wav")
+            Prov.kolla(abs(Wav.längd(av: wav) - 10) < 0.1,
+                       "längden håller genom rundturen (\(Wav.längd(av: wav)) s)")
+            let start = början(av: wav) ?? -1
+            Prov.kolla(abs(start - 3.0) < 0.03,
+                       "ljudet ligger kvar på samma ställe (tonen börjar \(start) s)")
+            Prov.lika(try? wav.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+                      inspelad, "och datumet följer med tillbaka")
+
+            vänta { await Ljudlagring.packaIhop(i: mapp, packa: true) }
+            Prov.kolla(!fm.fileExists(atPath: wav.path), "uppackningen tas bort efteråt")
+            Prov.lika((try? m4a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+                      packad, "m4a-filen skrivs inte om — ingen generationsförlust")
+        }
+
+        do {   // när ingenting ska packas
+            let mapp = fm.temporaryDirectory.appending(path: "kundkoll-test-\(UUID().uuidString)")
+            defer { try? fm.removeItem(at: mapp) }
+            try! fm.createDirectory(at: mapp, withIntermediateDirectories: true)
+            let wav = mapp.appending(path: "jag.wav")
+            try! Wav.data(av: prov).write(to: wav)
+
+            vänta { await Ljudlagring.packaIhop(i: mapp, packa: false) }
+            Prov.kolla(fm.fileExists(atPath: wav.path), "avstängd packning lämnar ett nytt möte orört")
+            Prov.kolla(!fm.fileExists(atPath: mapp.appending(path: "jag.m4a").path), "och skriver ingen m4a")
+
+            var i = Inspelning(titel: "t", inledd: Date(), längd: 10, kund: "k", projekt: nil,
+                               mikrofon: nil, liveYttranden: [], arkivYttranden: nil)
+            i.bearbetas = true
+            try! JSONEncoder.kundkoll.encode(i).write(to: mapp.appending(path: "möte.json"))
+            vänta { await Ljudlagring.packaIhop(i: mapp, packa: true) }
+            Prov.kolla(fm.fileExists(atPath: wav.path), "medan efterbearbetningen pågår rörs ljudet inte")
+
+            Prov.kolla(Ljudlagring.ärLjudfil("motpart.m4a") && Ljudlagring.ärLjudfil("jag.wav")
+                       && !Ljudlagring.ärLjudfil("möte.json"), "ljudfiler känns igen i båda formerna")
         }
     }
 

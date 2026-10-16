@@ -14,10 +14,13 @@ enum Omröstprov {
               let inspelning = try? JSONDecoder.kundkoll.decode(Inspelning.self, from: data)
         else { print("Hittar ingen möte.json i \(väg)"); return 1 }
 
-        let fil = mapp.appending(path: inspelning.enspårig ? "motpart.wav" : "motpart.wav")
-        guard FileManager.default.fileExists(atPath: fil.path) else {
+        guard Ljudlagring.fil("motpart", i: mapp) != nil else {
             print("Hittar inget ljud i \(väg)"); return 1
         }
+        do { try await Ljudlagring.packaUpp(i: mapp) } catch {
+            print("Kunde inte packa upp ljudet: \(error.localizedDescription)"); return 1
+        }
+        let fil = mapp.appending(path: "motpart.wav")
 
         let rader = inspelning.yttranden.filter { $0.röst == .motpart }
         print("\(inspelning.titel): \(formateraLängd(inspelning.längd)), \(rader.count) yttranden")
@@ -106,6 +109,7 @@ enum Omröstprov {
                        String(format: "de %d största täcker minst 90 %% av taltiden (%.0f %%)",
                               förväntat, störst / total * 100))
         }
+        await Ljudlagring.packaIhop(i: mapp, packa: false)
         return Prov.sammanfatta()
     }
 }

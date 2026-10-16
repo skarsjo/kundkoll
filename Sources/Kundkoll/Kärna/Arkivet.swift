@@ -1,6 +1,7 @@
 import Foundation
 
-/// Läser och skriver mappstrukturen under ~/Documents/Kunder.
+/// Läser och skriver mappstrukturen under kundmappen — ~/Documents/Kunder,
+/// eller den mapp som valts under ⌘,.
 ///
 /// Ingen databas. Det som ligger på disk är sanningen, så att kunder och
 /// projekt kan skapas lika gärna i Finder eller Obsidian som i appen.
@@ -9,6 +10,10 @@ final class Arkivet: ObservableObject {
     static let shared = Arkivet()
 
     let rot: URL
+    /// Obsidian-valvet kundmappen ligger i, om den ligger i ett. Då är
+    /// kunderna vanliga mappar i det valvet i stället för egna valv: ingen
+    /// .obsidian per kund, och ingenting i Obsidians valvlista.
+    let huvudvalv: URL?
     @Published private(set) var kunder: [Kund] = []
     /// Räknas upp varje gång en inspelning skrivits till disk — när den
     /// stoppas, och sedan igen när arkivtranskriptet, rösterna och
@@ -23,23 +28,41 @@ final class Arkivet: ObservableObject {
     private var bevakare: Filbevakare?
     private var omläsning: Task<Void, Never>?
 
-    /// ~/Documents/Kunder, eller mappen i miljövariabeln KUNDKOLL_ROT — för
-    /// demonstrationer och skärmbilder utan riktiga kunder i sidopanelen.
-    static var standardrot: URL {
-        if let väg = ProcessInfo.processInfo.environment["KUNDKOLL_ROT"], !väg.isEmpty {
-            return URL(fileURLWithPath: väg)
-        }
-        return FileManager.default.homeDirectoryForCurrentUser
+    /// Mappen i miljövariabeln KUNDKOLL_ROT — för demonstrationer och
+    /// skärmbilder utan riktiga kunder i sidopanelen — annars den valda
+    /// kundmappen, annars ~/Documents/Kunder.
+    nonisolated static var standardrot: URL {
+        if let väg = miljörot { return URL(fileURLWithPath: väg) }
+        if let väg = Inställningar.kundmapp { return URL(fileURLWithPath: väg) }
+        return förvaldRot
+    }
+
+    nonisolated static var förvaldRot: URL {
+        FileManager.default.homeDirectoryForCurrentUser
             .appending(path: "Documents")
             .appending(path: "Kunder")
     }
 
+    nonisolated static var miljörot: String? {
+        let väg = ProcessInfo.processInfo.environment["KUNDKOLL_ROT"] ?? ""
+        return väg.isEmpty ? nil : väg
+    }
+
     init(rot: URL? = nil) {
         self.rot = rot ?? Self.standardrot
+        self.huvudvalv = Obsidian.valvrot(ovanför: self.rot)
         try? fm.createDirectory(at: self.rot, withIntermediateDirectories: true)
         läsOm()
         // Bara den delade instansen bevakar; proven skapar tillfälliga rötter.
-        if rot == nil { startaBevakning() }
+        if rot == nil {
+            startaBevakning()
+            // Kunder som en gång var egna valv och sedan flyttats in i ett
+            // valv: står de kvar i Obsidians lista vinner de över huvudvalvet,
+            // och länkarna öppnar kundens lilla valv i stället.
+            if huvudvalv != nil {
+                for k in kunder { Obsidian.avregistrera(valv: k.mapp) }
+            }
+        }
     }
 
     // MARK: - Bevakning
@@ -55,7 +78,7 @@ final class Arkivet: ObservableObject {
     private func filerÄndrades(_ vägar: [String]) {
         let intressanta = vägar.filter { v in
             !v.contains("/.kundkoll/") && !v.contains("/.obsidian/")
-                && !v.hasSuffix(".wav") && !v.hasSuffix(".db")
+                && !Ljudlagring.ärLjudfil(v) && !v.hasSuffix(".db")
                 && !v.hasSuffix("-journal") && !v.hasSuffix("-wal") && !v.hasSuffix("-shm")
                 && !v.hasSuffix(".DS_Store")
         }
@@ -127,7 +150,7 @@ final class Arkivet: ObservableObject {
             .filter { mapp in
                 // Bara mappar som faktiskt innehåller ljud är värda att visa.
                 (try? fm.contentsOfDirectory(atPath: mapp.path))?
-                    .contains { $0.hasSuffix(".wav") } ?? false
+                    .contains { Ljudlagring.ärLjudfil($0) } ?? false
             }
             .map { ($0, storlek(av: $0)) }
             .sorted { $0.0.lastPathComponent > $1.0.lastPathComponent }
@@ -166,7 +189,7 @@ final class Arkivet: ObservableObject {
                   kund.mailmapp, kund.anteckningsmapp] {
             try fm.createDirectory(at: m, withIntermediateDirectories: true)
         }
-        try skapaValv(i: mapp, namn: namn)
+        if huvudvalv == nil { try skapaValv(i: mapp, namn: namn) }
         try skrivOmSaknas(kund.mapp.appending(path: "\(namn).md"), kundöversikt(namn))
         läsOm()
         return kund
@@ -207,13 +230,15 @@ final class Arkivet: ObservableObject {
     /// samma person är beror på mikrofon och rum, och den som var med i
     /// samtalet vet hur många som talade.
     func grupperaOm(_ inspelning: Inspelning, i mapp: URL, antal: Int?) async throws -> Inspelning {
+        guard Ljudlagring.fil("motpart", i: mapp) != nil else { throw Enkeltfel("Ljudspåret saknas.") }
+        try await Ljudlagring.packaUpp(i: mapp)
         let fil = mapp.appending(path: "motpart.wav")
-        guard fm.fileExists(atPath: fil.path) else { throw Enkeltfel("Ljudspåret saknas.") }
 
         let kund = kunder.first { $0.namn == inspelning.kund }
         let uppdelning = await Röstanalys().delaUpp(
             fil: fil, yttranden: inspelning.yttranden, antal: antal,
             profiler: kund.map { röstprofiler(för: $0) } ?? [])
+        await Ljudlagring.packaIhop(i: mapp)
 
         var ut = inspelning
         ut.arkivYttranden = uppdelning.yttranden
@@ -1243,25 +1268,10 @@ extension Arkivet {
             u.kund = namn
             try? spara(u, i: mapp)
         }
-        // Uppgifternas källor är sökvägar in i kundmappen.
-        try sparaUppgifter(uppgifter(för: ny).map { u in
-            var u = u
-            u.källa = flyttadVäg(u.källa, från: kund.mapp, till: nyMapp)
-            return u
-        }, för: ny)
+        try skrivOmSökvägar(för: ny, från: kund.mapp)
         // Kontaktnoter, mejlnot och tidslogg bär kundens namn i sin text.
         try? sparaKontakter(kontakter(för: ny), för: ny)
-        if var mail = mailcache(för: ny) {
-            mail.bilagor = mail.bilagor.map { b in
-                var b = b
-                b.fil = flyttadVäg(b.fil, från: kund.mapp, till: nyMapp) ?? b.fil
-                return b
-            }
-            try? skrivMailcache(mail, för: ny)
-        }
         try? sparaTidsposter(tidsposter(för: ny), för: ny)
-        // Indexet bär gamla sökvägar och byggs om vid nästa tillfälle.
-        glömIndex(hos: ny)
 
         Uppgiftssamling.flyttaStämpel(från: kund.namn, till: namn)
         Tidur.delad.byt(kund: kund.namn, till: namn)
@@ -1269,6 +1279,93 @@ extension Arkivet {
         läsOm()
         sparningar += 1
         return ny
+    }
+
+    /// Det i kundmappen som bär absoluta sökvägar: uppgifternas källor,
+    /// mejlbilagornas filer och sökindexet. Efter en flytt av mappen.
+    private func skrivOmSökvägar(för ny: Kund, från gammal: URL) throws {
+        try sparaUppgifter(uppgifter(för: ny).map { u in
+            var u = u
+            u.källa = flyttadVäg(u.källa, från: gammal, till: ny.mapp)
+            return u
+        }, för: ny)
+        if var mail = mailcache(för: ny) {
+            mail.bilagor = mail.bilagor.map { b in
+                var b = b
+                b.fil = flyttadVäg(b.fil, från: gammal, till: ny.mapp) ?? b.fil
+                return b
+            }
+            try? skrivMailcache(mail, för: ny)
+        }
+        // Indexet bär gamla sökvägar och byggs om vid nästa tillfälle.
+        glömIndex(hos: ny)
+    }
+
+    /// Varför kundmappen inte kan bytas till `ny`, eller nil om den kan det.
+    nonisolated static func invändning(mot ny: URL, nuvarande: URL) -> String? {
+        let n = kanonisk(ny.path), g = kanonisk(nuvarande.path)
+        if n == g { return "Det är redan kundmappen." }
+        if n.hasPrefix(g + "/") { return "Kundmappen kan inte flyttas in i sig själv." }
+        if g.hasPrefix(n + "/") {
+            return "Välj en egen mapp för kunderna, inte en mapp ovanför den nuvarande — "
+                + "varje mapp i kundmappen blir en kund."
+        }
+        if Obsidian.ärValv(ny) {
+            return "\(ny.lastPathComponent) är själva valvet. Välj eller skapa en mapp i det, "
+                + "till exempel Kunder — varje mapp i kundmappen blir en kund."
+        }
+        return nil
+    }
+
+    /// Flyttar alla kunder till en ny kundmapp, med allt som bär sökvägar.
+    ///
+    /// Ligger den nya mappen i ett Obsidian-valv blir kunderna vanliga
+    /// mappar där: deras .obsidian går till papperskorgen och de tas ur
+    /// Obsidians valvlista. Åt andra hållet blir de egna valv igen.
+    ///
+    /// Inget flyttas om någon kund redan finns i den nya mappen, och faller
+    /// en flytt halvvägs flyttas de redan flyttade tillbaka. Appen ska
+    /// startas om efteråt — `rot` är fast för en körning.
+    func flyttaKunder(till ny: URL) throws {
+        if let invändning = Self.invändning(mot: ny, nuvarande: rot) { throw Enkeltfel(invändning) }
+        try fm.createDirectory(at: ny, withIntermediateDirectories: true)
+        let krockar = kunder.filter { fm.fileExists(atPath: ny.appending(path: $0.namn).path) }
+        guard krockar.isEmpty else {
+            throw Enkeltfel("\(ny.lastPathComponent) har redan mappar som heter "
+                + krockar.map(\.namn).joined(separator: ", ") + ". Inget har flyttats.")
+        }
+        let iValv = Obsidian.valvrot(ovanför: ny) != nil
+
+        var flyttade: [(Kund, Kund)] = []
+        do {
+            for kund in kunder {
+                let flyttad = Kund(namn: kund.namn, mapp: ny.appending(path: kund.namn))
+                try fm.moveItem(at: kund.mapp, to: flyttad.mapp)
+                flyttade.append((kund, flyttad))
+                try skrivOmSökvägar(för: flyttad, från: kund.mapp)
+            }
+        } catch {
+            for (kund, flyttad) in flyttade.reversed() {
+                guard (try? fm.moveItem(at: flyttad.mapp, to: kund.mapp)) != nil else { continue }
+                try? skrivOmSökvägar(för: kund, från: flyttad.mapp)
+            }
+            cache.glömAllt()
+            throw error
+        }
+
+        for (kund, flyttad) in flyttade {
+            if iValv {
+                Obsidian.avregistrera(valv: kund.mapp)
+                let konf = flyttad.mapp.appending(path: ".obsidian")
+                if fm.fileExists(atPath: konf.path) {
+                    try? fm.trashItem(at: konf, resultingItemURL: nil)
+                }
+            } else {
+                try? skapaValv(i: flyttad.mapp, namn: flyttad.namn)
+                Obsidian.byt(valv: kund.mapp, till: flyttad.mapp)
+            }
+        }
+        cache.glömAllt()
     }
 
     /// Flyttar kunden med allt innehåll till papperskorgen.

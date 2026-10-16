@@ -172,6 +172,21 @@ enum Inställningar {
         set { UserDefaults.standard.set(newValue, forKey: "kundkoll.automatiskaModellanrop") }
     }
 
+    /// Kundmappen. Tomt betyder ~/Documents/Kunder. Läses när appen
+    /// startar; ett byte görs med flytten under ⌘, och en omstart.
+    static var kundmapp: String? {
+        get { tom(UserDefaults.standard.string(forKey: "kundkoll.kundmapp")) }
+        set { UserDefaults.standard.set(tom(newValue), forKey: "kundkoll.kundmapp") }
+    }
+
+    /// Om mötets ljud packas till m4a när efterbearbetningen är klar.
+    /// På som standard: wav är runt åtta gånger större, och kundmappen kan
+    /// ligga i ett synkat Obsidian-valv. Se `Ljudlagring`.
+    static var packaLjud: Bool {
+        get { UserDefaults.standard.object(forKey: "kundkoll.packaLjud") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "kundkoll.packaLjud") }
+    }
+
     /// Var whisper.cpp ligger. Tomt betyder ~/Projekt/whisper.cpp.
     static var whisperRot: String? {
         get { tom(UserDefaults.standard.string(forKey: "kundkoll.whisperRot")) }

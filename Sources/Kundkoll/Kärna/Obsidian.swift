@@ -53,6 +53,16 @@ enum Obsidian {
         return nil
     }
 
+    /// Om mappen själv är ett valv.
+    static func ärValv(_ mapp: URL) -> Bool {
+        FileManager.default.fileExists(atPath: mapp.appending(path: ".obsidian").path)
+    }
+
+    /// Valvet som mappen ligger inuti, om något — mappen själv räknas inte.
+    static func valvrot(ovanför mapp: URL) -> URL? {
+        hittaValvrot(från: mapp.standardizedFileURL.deletingLastPathComponent())
+    }
+
     /// Lägger till mappen i Obsidians lista. Obsidian läser om den direkt.
     @discardableResult
     static func registrera(valv mapp: URL) -> Bool {
@@ -117,7 +127,11 @@ enum Obsidian {
     /// Öppnar sökvägen, och gör mappen känd för Obsidian först om det behövs.
     /// - Parameter valvrot: kundens mapp. Utelämnas den letas den upp genom
     ///   att gå uppåt tills en mapp med `.obsidian` hittas.
-    static func öppna(_ url: URL, valvrot: URL? = nil) {
+    @MainActor
+    static func öppna(_ url: URL, valvrot angiven: URL? = nil) {
+        // Ligger kunderna i ett vanligt valv är det valvet som gäller, inte
+        // kundmappen — den är bara en mapp bland andra där.
+        let valvrot = Arkivet.shared.huvudvalv ?? angiven
         let varOkänt = valv(för: url) == nil
         if varOkänt, let rot = valvrot ?? hittaValvrot(från: url) {
             registrera(valv: rot)
