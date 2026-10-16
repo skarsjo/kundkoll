@@ -23,7 +23,7 @@ struct Modellvy: View {
             switch self {
             case .modell: "Modell"
             case .transkribering: "Transkribering"
-            case .röster: "Röster och insikter"
+            case .röster: "Röster"
             case .lagring: "Lagring"
             case .diagnos: "Diagnos"
             }
@@ -103,7 +103,7 @@ struct Modellvy: View {
             }
             .padding(16)
         }
-        .frame(width: 560, height: 620)
+        .frame(width: 620, height: 620)
         .onAppear(perform: läsNyckel)
         .onChange(of: flik) { if flik == .diagnos, diagnos.isEmpty { kontrollera() } }
     }
