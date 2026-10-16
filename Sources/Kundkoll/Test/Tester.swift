@@ -678,6 +678,24 @@ enum Tester {
             Prov.lika(Sammanfattare.tolka(ikodruta)?.beslut.count, 1, "och innehållet kommer med")
 
             Prov.kolla(Sammanfattare.tolka("inget här") == nil, "text utan JSON ger nil")
+
+            // qwen3 och andra tänkande modeller skriver resonemanget först
+            let tänkt = "<think>Fältet {kärna} ska vara kort.</think>\n" + json
+            Prov.lika(Sammanfattare.tolka(tänkt)?.beslut.count, 1, "tänkandet rensas bort")
+            let utanVad = Sammanfattare.tolka(#"{"kärna":"k","beslut":[],"öppet":[],"åtaganden":[{"vad":null},{"vad":"Ring"}]}"#)
+            Prov.lika(utanVad?.åtaganden.count, 1, "ett åtagande utan vad hoppas över")
+
+            // Lokala Ollama-anrop går direkt mot /api/chat
+            let lokal = Modellval(leverantör: .lokal, modell: "qwen3:8b")
+            Prov.lika(Sammanfattare.ollamaAdress(för: lokal)?.absoluteString,
+                      "http://127.0.0.1:11434/api/chat", "Ollama nås via sitt eget gränssnitt")
+            Prov.kolla(Sammanfattare.ollamaAdress(för: Modellval(leverantör: .lokal, adress: "http://127.0.0.1:1234/v1/chat/completions")) == nil,
+                       "LM Studio går den vanliga vägen")
+            Prov.kolla(Sammanfattare.ollamaAdress(för: Modellval(leverantör: .openrouter)) == nil,
+                       "molnmodeller går den vanliga vägen")
+            Prov.lika(Sammanfattare.fönster(för: String(repeating: "a", count: 60_000)), 24576,
+                      "fönstret räcker för ett långt transkript")
+            Prov.lika(Sammanfattare.fönster(för: "kort"), 8192, "men aldrig mindre än 8192")
             let tom = Sammanfattare.tolka("""
             {"kärna": "", "beslut": [], "åtaganden": [], "öppet": []}
             """)

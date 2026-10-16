@@ -122,15 +122,117 @@ actor Sammanfattare {
         \(text)
         """
 
-        let svar = try await chatt.fråga(uppdrag, om: kund, projekt: inspelning.projekt,
-                                         träffar: [], historik: [])
-        guard let tolkad = Self.tolka(svar.text) else { throw Fel.otolkbart }
+        let val = await chatt.modellval
+        let svarstext: String
+        if let ollama = Self.ollamaAdress(för: val) {
+            svarstext = try await Self.frågaOllama(uppdrag, modell: val.modell, adress: ollama)
+        } else {
+            svarstext = try await chatt.fråga(uppdrag, om: kund, projekt: inspelning.projekt,
+                                              träffar: [], historik: []).text
+        }
+        guard let tolkad = Self.tolka(svarstext) else { throw Fel.otolkbart }
         return tolkad
+    }
+
+    // MARK: - Ollama direkt
+
+    /// Ollamas OpenAI-gränssnitt kör med standardfönstret, ofta 4096 tokens.
+    /// Ett transkript på 60 000 tecken kapas då bakifrån och framåt, och med
+    /// början försvinner uppdraget — modellen ser bara en bit samtal och
+    /// svarar med fritext. qwen3 tänker dessutom högt och kan lägga hela
+    /// svarsutrymmet på det. Ollamas eget gränssnitt låter oss sätta fönstret,
+    /// stänga av tänkandet och kräva svar enligt ett JSON-schema.
+    static func ollamaAdress(för val: Modellval) -> URL? {
+        guard val.leverantör == .lokal, let url = val.url, url.port == 11434,
+              var delar = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        else { return nil }
+        delar.path = "/api/chat"
+        delar.query = nil
+        return delar.url
+    }
+
+    /// Fönstret räknas fram ur texten: svensk text blir ungefär en token per
+    /// tre tecken. Större fönster än nödvändigt kostar minne i onödan.
+    static func fönster(för uppdrag: String) -> Int {
+        let behov = uppdrag.count / 3 + 4096
+        let steg = 4096
+        return min(max(8192, (behov + steg - 1) / steg * steg), 32768)
+    }
+
+    static let schema: [String: Any] = {
+        let text: [String: Any] = ["type": "string"]
+        let kanskeText: [String: Any] = ["type": ["string", "null"]]
+        let lista: [String: Any] = ["type": "array", "items": text]
+        let åtagande: [String: Any] = [
+            "type": "object",
+            "properties": ["vad": text, "vem": kanskeText,
+                           "när": kanskeText, "senast": kanskeText] as [String: Any],
+            "required": ["vad"],
+        ]
+        return [
+            "type": "object",
+            "properties": [
+                "kärna": text,
+                "beslut": lista,
+                "åtaganden": ["type": "array", "items": åtagande] as [String: Any],
+                "öppet": lista,
+            ] as [String: Any],
+            "required": ["kärna", "beslut", "åtaganden", "öppet"],
+        ]
+    }()
+
+    private static func frågaOllama(_ uppdrag: String, modell: String, adress: URL) async throws -> String {
+        let kropp: [String: Any] = [
+            "model": modell,
+            "messages": [
+                ["role": "system", "content":
+                    "Du sammanfattar mötestranskript åt en konsult. Svara alltid med JSON enligt schemat."],
+                ["role": "user", "content": uppdrag],
+            ],
+            "stream": false,
+            "format": schema,
+            "think": false,
+            "options": [
+                "num_ctx": fönster(för: uppdrag),
+                "num_predict": 4096,
+                "temperature": 0.2,
+            ] as [String: Any],
+        ]
+        var r = URLRequest(url: adress)
+        r.httpMethod = "POST"
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try JSONSerialization.data(withJSONObject: kropp)
+        // Ett långt möte på en laptop kan ta ett par minuter.
+        r.timeoutInterval = 600
+
+        let (data, svar): (Data, URLResponse)
+        do {
+            (data, svar) = try await URLSession.shared.data(for: r)
+        } catch {
+            throw Fel.nårInteOllama
+        }
+        guard let http = svar as? HTTPURLResponse, http.statusCode == 200 else {
+            throw Fel.frånOllama(String(data: data, encoding: .utf8) ?? "")
+        }
+        struct Yttre: Decodable {
+            struct M: Decodable { let content: String? }
+            let message: M
+        }
+        guard let text = (try? JSONDecoder().decode(Yttre.self, from: data))?.message.content,
+              !text.isEmpty else { throw Fel.otolkbart }
+        return text
     }
 
     /// Modeller lägger gärna JSON i en kodruta, eller skriver en rad före.
     static func tolka(_ text: String) -> Mötessammanfattning? {
-        var rent = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var rent = text
+        // Tänkande modeller (qwen3, deepseek-r1) kan skriva ut sitt
+        // resonemang först, och där finns gärna klamrar som stör.
+        while let start = rent.range(of: "<think>"),
+              let slut = rent.range(of: "</think>", range: start.upperBound..<rent.endIndex) {
+            rent.removeSubrange(start.lowerBound..<slut.upperBound)
+        }
+        rent = rent.trimmingCharacters(in: .whitespacesAndNewlines)
         if let start = rent.range(of: "```") {
             rent = String(rent[start.upperBound...])
             if rent.hasPrefix("json") { rent = String(rent.dropFirst(4)) }
@@ -143,7 +245,7 @@ actor Sammanfattare {
 
         struct Rå: Decodable {
             struct Å: Decodable {
-                let vad: String; let vem: String?; let när: String?; let senast: String?
+                let vad: String?; let vem: String?; let när: String?; let senast: String?
             }
             let kärna: String?
             let beslut: [String]?
@@ -154,9 +256,10 @@ actor Sammanfattare {
         return Mötessammanfattning(
             kärna: rå.kärna ?? "",
             beslut: rå.beslut ?? [],
-            åtaganden: (rå.åtaganden ?? []).map {
-                .init(vad: $0.vad, vem: tomSomNil($0.vem), när: tomSomNil($0.när),
-                      senast: Uppgift.dag(tomSomNil($0.senast)))
+            åtaganden: (rå.åtaganden ?? []).compactMap { å -> Mötessammanfattning.Åtagande? in
+                guard let vad = tomSomNil(å.vad) else { return nil }
+                return Mötessammanfattning.Åtagande(vad: vad, vem: tomSomNil(å.vem), när: tomSomNil(å.när),
+                      senast: Uppgift.dag(tomSomNil(å.senast)))
             },
             öppet: rå.öppet ?? [])
     }
@@ -168,6 +271,14 @@ actor Sammanfattare {
 
     enum Fel: LocalizedError {
         case otolkbart
-        var errorDescription: String? { "Sammanfattningen gick inte att tolka." }
+        case nårInteOllama
+        case frånOllama(String)
+        var errorDescription: String? {
+            switch self {
+            case .otolkbart: "Sammanfattningen gick inte att tolka."
+            case .nårInteOllama: "Ollama svarar inte på 127.0.0.1:11434. Starta den med: ollama serve"
+            case .frånOllama(let text): "Ollama svarade med ett fel: \(text.prefix(300))"
+            }
+        }
     }
 }

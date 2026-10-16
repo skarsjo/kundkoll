@@ -176,29 +176,33 @@ struct Huvudvy: View {
         // Ett projekt som väljs någon annanstans ifrån — paletten, sökningen,
         // en notis, kundens översikt eller ett namnbyte — fäller ut sin gren.
         // Sedan är det bara pilen som stänger den igen.
-        .onChange(of: val) {
-            guard let projekt = val?.projekt,
-                  let kund = arkiv.kunder.first(where: { $0.namn == projekt.kundnamn })
-            else { return }
-            utfällda.insert(kund.id)
-        }
+        .onChange(of: val) { fällUtValtProjekt() }
         // En kund som döpts om eller tagits bort i Finder får inte lämna
         // ett val som pekar på en mapp som inte finns.
-        .onChange(of: arkiv.kunder) {
-            switch val {
-            case .kund(let k) where !arkiv.kunder.contains(k):
-                val = arkiv.kunder.first.map { .kund($0) }
-            case .projekt(let p) where !arkiv.kunder.contains(where: { $0.namn == p.kundnamn }):
-                val = arkiv.kunder.first.map { .kund($0) }
-            default:
-                break
-            }
-        }
+        .onChange(of: arkiv.kunder) { släppBorttagetVal() }
         .onReceive(NotificationCenter.default.publisher(for: .nyKund)) { _ in visaNyKund = true }
         .onReceive(NotificationCenter.default.publisher(for: .sök)) { _ in visaSök = true }
         .onReceive(NotificationCenter.default.publisher(for: .visaNyckel)) { _ in visaNyckel = true }
         .onAppear {
             if val == nil, let första = arkiv.kunder.first { val = .kund(första) }
+        }
+    }
+
+    private func fällUtValtProjekt() {
+        guard let projekt = val?.projekt,
+              let kund = arkiv.kunder.first(where: { $0.namn == projekt.kundnamn })
+        else { return }
+        utfällda.insert(kund.id)
+    }
+
+    private func släppBorttagetVal() {
+        switch val {
+        case .kund(let k) where !arkiv.kunder.contains(k):
+            val = arkiv.kunder.first.map { .kund($0) }
+        case .projekt(let p) where !arkiv.kunder.contains(where: { $0.namn == p.kundnamn }):
+            val = arkiv.kunder.first.map { .kund($0) }
+        default:
+            break
         }
     }
 

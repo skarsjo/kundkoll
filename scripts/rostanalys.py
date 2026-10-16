@@ -36,6 +36,22 @@ def fel(text):
     sys.exit(1)
 
 
+def ladda_ljud(wav, torch):
+    """Läser ljudfilen med soundfile och ger (1, n) i 16 kHz mono.
+
+    Går förbi torchcodec, som kräver att FFmpeg:s delade bibliotek matchar
+    exakt den torch-version som är installerad.
+    """
+    import soundfile as sf
+    data, sr = sf.read(wav, dtype="float32", always_2d=True)
+    vag = torch.from_numpy(data.T.copy()).mean(dim=0, keepdim=True)
+    if sr != 16000:
+        import torchaudio
+        vag = torchaudio.functional.resample(vag, sr, 16000)
+        sr = 16000
+    return vag, sr
+
+
 def main():
     try:
         begaran = json.load(sys.stdin)
@@ -120,13 +136,10 @@ def main():
         fel(f"kunde inte ladda ECAPA-modellen: {e}")
 
     try:
-        vag, sr = torchaudio.load(wav)
+        vag, sr = ladda_ljud(wav, torch)
     except Exception as e:
         fel(f"kunde inte läsa ljudet: {e}")
     vag = vag[0]
-    if sr != 16000:
-        vag = torchaudio.functional.resample(vag, sr, 16000)
-        sr = 16000
 
     ut = []
     for tur in turer:
@@ -179,7 +192,12 @@ def diarisera(wav, begaran, torch):
         kwargs["num_speakers"] = int(begaran["antal"])
 
     try:
-        resultat = pipeline(wav, **kwargs)
+        vag, sr = ladda_ljud(wav, torch)
+    except Exception as e:
+        fel(f"kunde inte läsa ljudet: {e}")
+
+    try:
+        resultat = pipeline({"waveform": vag, "sample_rate": sr}, **kwargs)
     except Exception as e:
         fel(f"diariseringen misslyckades: {e}")
 

@@ -115,6 +115,7 @@ actor Chatt {
 
     var färdig: Bool { val.färdig }
     var leverantör: Leverantör { val.leverantör }
+    var modellval: Modellval { val }
 
     /// Ställer en fråga med utdrag ur kunskapsbanken som underlag.
     ///
