@@ -175,6 +175,14 @@ struct Kundinnehåll: View {
 
     @ViewBuilder
     private var översikt: some View {
+        if kund.ärOdefinierad {
+            Label("Här hamnar möten som spelats in utan kund. Högerklicka på ett möte "
+                  + "och välj Flytta till för att knyta det till rätt kund.",
+                  systemImage: "tray")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
         mötesavsnitt
         projektavsnitt
         kontaktavsnitt

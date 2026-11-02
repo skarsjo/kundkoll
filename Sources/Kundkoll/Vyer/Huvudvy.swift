@@ -366,7 +366,14 @@ struct Huvudvy: View {
         case .minVecka:
             Minveckavy()
         case nil:
-            ContentUnavailableView("Välj en kund", systemImage: "person.2")
+            ContentUnavailableView {
+                Label("Välj en kund", systemImage: "person.2")
+            } description: {
+                Text("Eller spela in direkt och knyt mötet till en kund efteråt.")
+            } actions: {
+                Button("Spela in utan kund") { startaUtanKund() }
+                    .disabled(session.pågår)
+            }
         }
     }
 
@@ -382,6 +389,18 @@ struct Huvudvy: View {
                 .disabled(session.pågår)
                 .help(session.pågår ? "En inspelning pågår redan" : "Spela in ett samtal")
             }
+        } else {
+            // Ett möte börjar inte alltid med att man vet vems det är.
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: startaUtanKund) {
+                    Label("Spela in", systemImage: "record.circle")
+                }
+                .disabled(session.pågår)
+                .help(session.pågår ? "En inspelning pågår redan"
+                      : "Spela in utan att välja kund — mötet knyts till en kund efteråt")
+            }
+        }
+        if let kund = valdKund {
             ToolbarItem {
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) { visaChatt.toggle() }
@@ -417,6 +436,11 @@ struct Huvudvy: View {
 
     private func starta(kund: Kund) {
         Inspelningsfönster.öppna(kund: kund, projekt: val?.projekt, möte: nil)
+    }
+
+    private func startaUtanKund() {
+        guard let kund = try? arkiv.odefinieradKund() else { return }
+        Inspelningsfönster.öppna(kund: kund, projekt: nil, möte: nil)
     }
 
     // MARK: - Ny kund

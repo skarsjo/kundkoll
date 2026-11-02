@@ -15,7 +15,14 @@ struct Inspelningsvy: View {
     @EnvironmentObject private var session: Inspelningssession
 
     @State private var titel = ""
-    @State private var valtProjekt: Projekt?
+    @State private var mål: Mål = .kund
+    @State private var målfel: String?
+
+    /// Var mötet hamnar. Vet man inte vilken kund det gäller läggs det hos
+    /// den odefinierade kunden och flyttas dit det hör efteråt.
+    private enum Mål: Hashable {
+        case kund, projekt(Projekt), odefinierad
+    }
     /// "sv", "en" eller nil för att låta motorn avgöra.
     @State private var språk: String? = "sv"
     /// Språket man valde sist. Den som har många engelska möten ska slippa
@@ -49,7 +56,7 @@ struct Inspelningsvy: View {
         mikrofoner = Ljudinfångning.mikrofoner()
         valdMikrofon = mikrofoner.first { $0.id == sparadMikrofon } ?? mikrofoner.first
         projektlista = arkiv.projekt(för: kund)
-        valtProjekt = projekt
+        mål = projekt.map { .projekt($0) } ?? .kund
         språk = sparatSpråk == "auto" ? nil : sparatSpråk
         if titel.isEmpty { titel = möte?.titel ?? "" }
 
@@ -67,9 +74,13 @@ struct Inspelningsvy: View {
 
             Form {
                 TextField("Vad gäller samtalet?", text: $titel)
-                Picker("Hör till", selection: $valtProjekt) {
-                    Text(kund.namn).tag(Projekt?.none)
-                    ForEach(projektlista) { p in Text(p.namn).tag(Projekt?.some(p)) }
+                Picker("Hör till", selection: $mål) {
+                    Text(kund.namn).tag(Mål.kund)
+                    ForEach(projektlista) { p in Text(p.namn).tag(Mål.projekt(p)) }
+                    if !kund.ärOdefinierad {
+                        Divider()
+                        Text("\(Kund.odefinieradNamn) — knyt senare").tag(Mål.odefinierad)
+                    }
                 }
                 Picker("Språk", selection: $språk) {
                     ForEach(Mötesspråk.val, id: \.kod) { s in
@@ -94,6 +105,11 @@ struct Inspelningsvy: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            if let målfel {
+                Label(målfel, systemImage: "exclamationmark.triangle")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            }
             if case .fel(let text) = session.läge {
                 Label(text, systemImage: "exclamationmark.triangle")
                     .font(.callout)
@@ -284,7 +300,18 @@ struct Inspelningsvy: View {
         guard let mikrofon = valdMikrofon else { return }
         sparadMikrofon = mikrofon.id
         sparatSpråk = språk ?? "auto"
-        let placering: Placering = valtProjekt.map { .projekt($0) } ?? .kund(kund)
+        let placering: Placering
+        switch mål {
+        case .kund: placering = .kund(kund)
+        case .projekt(let p): placering = .projekt(p)
+        case .odefinierad:
+            do {
+                placering = .kund(try arkiv.odefinieradKund())
+            } catch {
+                målfel = "Kunde inte skapa \(Kund.odefinieradNamn): \(error.localizedDescription)"
+                return
+            }
+        }
         let namn = titel.trimmingCharacters(in: .whitespaces)
         Task {
             await session.starta(

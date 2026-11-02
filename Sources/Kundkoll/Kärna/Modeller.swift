@@ -14,6 +14,13 @@ struct Kund: Identifiable, Hashable {
     var kontaktmapp: URL { mapp.appending(path: "Kontakter") }
     var mailmapp: URL { mapp.appending(path: "Mail") }
     var anteckningsmapp: URL { mapp.appending(path: "Anteckningar") }
+
+    /// Dit möten går som spelats in innan man visste vilken kund de gällde.
+    /// En vanlig kundmapp, så att allt annat — transkript, röster,
+    /// sammanfattning — fungerar som vanligt; mötet knyts till rätt kund
+    /// efteråt med «Flytta till».
+    static let odefinieradNamn = "Odefinierad kund"
+    var ärOdefinierad: Bool { namn == Self.odefinieradNamn }
 }
 
 struct Projekt: Identifiable, Hashable {

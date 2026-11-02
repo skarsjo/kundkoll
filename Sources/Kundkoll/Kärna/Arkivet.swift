@@ -195,6 +195,12 @@ final class Arkivet: ObservableObject {
         return kund
     }
 
+    /// Kunden för möten utan kund. Skapas första gången den behövs.
+    func odefinieradKund() throws -> Kund {
+        if let k = kunder.first(where: \.ärOdefinierad) { return k }
+        return try skapaKund(namn: Kund.odefinieradNamn)
+    }
+
     @discardableResult
     func skapaProjekt(namn: String, hos kund: Kund) throws -> Projekt {
         let namn = städa(namn)
