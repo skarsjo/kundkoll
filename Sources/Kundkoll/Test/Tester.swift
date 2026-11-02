@@ -1090,6 +1090,28 @@ enum Tester {
             let utanRiktning = "Monday, 3 August 2026 at 08:00:00\u{1F}A <a@x.se>\u{1F}Ämne\u{1F}<b@x>\u{1F}konto\u{1F}INBOX"
             Prov.lika(Mailen.tolka(utanRiktning).count, 1, "rader utan riktningsfält tolkas ändå")
         }
+
+        do {   // en körning per kund: mejl och bilagor i samma svar
+            let f = "\u{1F}"
+            let mapp = URL(fileURLWithPath: "/tmp/kund/Bilagor")
+            let mejlrad = "Monday, 3 August 2026 at 08:00:00\(f)A <a@x.se>\(f)Offert\(f)<m1@x>\(f)konto\(f)INBOX\(f)fran\(f)Hej\n"
+            // Samma utskick hittas för två adresser och ska räknas en gång.
+            let svar = Mailen.tolkaSvar(
+                mejlrad + mejlrad + "\u{1E}\n"
+                + "Offert\(f)offert.pdf\(f)/tmp/kund/Bilagor/offert.pdf\(f)1200\n"
+                + "Offert\(f)offert.pdf\(f)/tmp/kund/Bilagor/offert.pdf\(f)1200\n"
+                + "Elak\(f)x.pdf\(f)/tmp/annat/x.pdf\(f)10\n",
+                bilagor: mapp)
+            Prov.lika(svar.mejl.count, 1, "samma mejl för två adresser räknas en gång")
+            Prov.lika(svar.mejl.first?.ämne, "Offert", "mejldelen tolkas")
+            Prov.lika(svar.bilagor.map(\.namn), ["offert.pdf"],
+                      "bilagedelen tolkas, utan dubbletter och utan filer utanför mappen")
+
+            let utanBilagor = Mailen.tolkaSvar(mejlrad + "\u{1E}\n", bilagor: mapp)
+            Prov.lika(utanBilagor.mejl.count, 1, "mejl utan bilagor")
+            Prov.lika(utanBilagor.bilagor.count, 0, "och inga bilagor")
+            Prov.lika(Mailen.tolkaSvar("", bilagor: mapp).mejl.count, 0, "tomt svar ger ingenting")
+        }
     }
 
     // MARK: - Röstanalys

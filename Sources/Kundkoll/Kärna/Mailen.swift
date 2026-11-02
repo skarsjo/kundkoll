@@ -92,21 +92,37 @@ actor Mailen {
 
     var finns: Bool { FileManager.default.fileExists(atPath: skript.path) }
 
-    /// Mejl till eller från en adress, nyast först.
+    /// Det en sökning ger: mejlen, nyast först, och bilagorna som sparades.
+    struct Svar {
+        var mejl: [Mejl]
+        var bilagor: [Bilagor.Bilaga]
+    }
+
+    /// Mejl till eller från en kunds adresser, och bilagorna i dem.
     ///
-    /// `antal` gäller per postlåda i skriptet, så resultatet kan bli fler —
-    /// annars skulle inkorgen fylla hela kvoten och det man själv skickat
-    /// aldrig komma med. Här klipps listan efter att den sorterats på datum.
-    func sök(adress: String, max antal: Int = 20) async throws -> [Mejl] {
+    /// Allt går i en enda körning mot Mail. Mail svarar på AppleScript i sin
+    /// egen huvudtråd, och en körning per adress för mejlen och en till för
+    /// bilagorna fick det att snurra i minuter med ett stort arkiv.
+    ///
+    /// `antal` och `maxBilagor` gäller per postlåda och adress i skriptet, så
+    /// resultatet kan bli fler — annars skulle inkorgen fylla hela kvoten och
+    /// det man själv skickat aldrig komma med.
+    /// - Parameter mapp: dit bilagorna sparas.
+    func sök(adresser: [String], bilagor mapp: URL, max antal: Int = 20,
+             maxBilagor: Int = 40) async throws -> Svar {
         guard FileManager.default.fileExists(atPath: skript.path) else {
             throw Fel.skriptSaknas
         }
+        guard !adresser.isEmpty else { return Svar(mejl: [], bilagor: []) }
+        try FileManager.default.createDirectory(at: mapp, withIntermediateDirectories: true)
+
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        p.arguments = [skript.path, adress, String(antal)]
+        p.arguments = [skript.path, mapp.path, String(antal), String(maxBilagor)] + adresser
         // Mail som står och väntar på en behörighetsfråga fick tidigare
-        // sökningen att hänga för evigt.
-        let utfall = try await Underprocess.kör(p, tidsgräns: 3 * 60)
+        // sökningen att hänga för evigt. Bilagorna sparas i samma körning,
+        // därav den längre gränsen.
+        let utfall = try await Underprocess.kör(p, tidsgräns: 10 * 60)
 
         if utfall.kod != 0 {
             let text = utfall.feltext
@@ -114,7 +130,54 @@ actor Mailen {
                 ? Fel.nekad
                 : Fel.frånMail(text)
         }
-        return Array(Self.tolka(utfall.uttext).prefix(antal * 2))
+        return Self.tolkaSvar(utfall.uttext, bilagor: mapp)
+    }
+
+    /// Sökningar som pågår, per bilagemapp — alltså per kund.
+    @MainActor private static var pågående: [String: Task<Svar, Error>] = [:]
+    /// Den senast startade sökningen; nästa väntar in den.
+    @MainActor private static var senaste: Task<Svar, Error>?
+
+    /// Som `sök`, men aldrig två samtidigt mot Mail.
+    ///
+    /// Varje sökning låser Mail medan den pågår. Kundvyn startade en ny varje
+    /// gång man kom tillbaka till appen, och med fem i gång samtidigt stod
+    /// Mail och snurrade i minuter. Nu får den som ber om samma kund igen
+    /// vänta in svaret som redan är på väg, och sökningar för olika kunder
+    /// går en i taget.
+    @MainActor
+    static func sökEnGång(adresser: [String], bilagor mapp: URL) async throws -> Svar {
+        let nyckel = mapp.standardizedFileURL.path
+        if let pågår = pågående[nyckel] { return try await pågår.value }
+        let före = senaste
+        let uppgift = Task<Svar, Error> {
+            _ = try? await före?.value
+            return try await Mailen().sök(adresser: adresser, bilagor: mapp)
+        }
+        pågående[nyckel] = uppgift
+        senaste = uppgift
+        do {
+            let svar = try await uppgift.value
+            pågående[nyckel] = nil
+            return svar
+        } catch {
+            pågående[nyckel] = nil
+            throw error
+        }
+    }
+
+    /// Skriptets svar har mejlen först och bilagorna efter en rad med bara
+    /// ASCII 30. Samma mejl kan komma med för två adresser — ett utskick
+    /// till två kontakter — och räknas då en gång.
+    static func tolkaSvar(_ text: String, bilagor mapp: URL?) -> Svar {
+        let delar = text.components(separatedBy: "\u{1E}")
+        var sedda = Set<String>()
+        let mejl = tolka(delar[0]).filter { sedda.insert($0.id).inserted }
+        var seddaFiler = Set<String>()
+        let bilagor = delar.count > 1
+            ? Bilagor.tolka(delar[1], inom: mapp).filter { seddaFiler.insert($0.fil).inserted }
+            : []
+        return Svar(mejl: mejl, bilagor: bilagor)
     }
 
     /// Fälten är åtskilda av ASCII 31, eftersom ämnesrader gärna innehåller

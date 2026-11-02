@@ -158,17 +158,16 @@ struct Kundinnehåll: View {
         .onChange(of: kalender.ändringar) { Task { await hämtaMöten() } }
         // Och när man kommer tillbaka till appen efter att ha varit någon
         // annanstans är det troligt att något hänt.
+        // Mejlen hämtas också då, men bara om de är gamla: Mail säger inte
+        // till när något kommer in, och varje sökning låser Mail medan den
+        // pågår. En timer som sökte var femte minut fick Mail att snurra
+        // fram och tillbaka hela dagen. Knappen hämtar alltid.
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didBecomeActiveNotification)) { _ in
             Task {
                 await hämtaMöten()
-                await visaMejl(äldreÄn: 5 * 60)
+                await visaMejl()
             }
-        }
-        // Mail säger inte till när något kommer in, så det får kollas med
-        // jämna mellanrum. Sökningen tar sekunder, därför inte oftare.
-        .onReceive(Timer.publish(every: 300, on: .main, in: .common).autoconnect()) { _ in
-            Task { await visaMejl(äldreÄn: 15 * 60) }
         }
     }
 
@@ -596,84 +595,66 @@ struct Kundinnehåll: View {
         }
     }
 
-    /// - Parameter äldreÄn: hämta om cachen är äldre än så här. Timern och
-    ///   återkomsten till appen använder olika gränser: den som just kommit
-    ///   tillbaka vill se det senaste, medan en timer som går hela dagen inte
-    ///   ska söka i Mail i onödan.
-    private func visaMejl(äldreÄn: TimeInterval = 15 * 60) async {
+    /// Visar de sparade mejlen och hämtar nya om de är äldre än `äldreÄn`.
+    ///
+    /// Under en inspelning hämtas ingenting av sig självt. Sökningen låser
+    /// Mail, och mitt i ett möte är det just då man behöver kunna öppna ett
+    /// mejl. Knappen hämtar ändå.
+    private func visaMejl(äldreÄn: TimeInterval = 30 * 60) async {
         // Kontakterna läses här och inte ur vyns tillstånd: den fylls av
         // onAppear, som kan hinna köra efter den här uppgiften.
         let adresser = Array(Set(arkiv.kontakter(för: kund).flatMap(\.epost))).prefix(5)
         guard !adresser.isEmpty else { return }
 
-        guard let cache = arkiv.mailcache(för: kund) else {
-            // Ingen cache alls: kunden har aldrig hämtat mejl. Att avbryta här
-            // gjorde att första hämtningen aldrig skedde av sig själv.
-            await hämtaMejl()
-            return
+        let cache = arkiv.mailcache(för: kund)
+        if let cache {
+            mejl = cache.mejl
+            bilagor = cache.bilagor
+            // En sökning som redan pågår ska få fortsätta visa det. Att sätta
+            // .klar här släppte spärren i hämtaMejl, och varje återkomst till
+            // appen startade en sökning till.
+            if case .hämtar = mejlLäge {} else { mejlLäge = .klar }
         }
-        mejl = cache.mejl
-        bilagor = cache.bilagor
-        mejlLäge = .klar
-
-        if cache.ålder >= äldreÄn {
+        guard !spelarIn else { return }
+        // Ingen cache alls: kunden har aldrig hämtat mejl. Att avbryta då
+        // gjorde att första hämtningen aldrig skedde av sig själv.
+        if (cache?.ålder ?? .infinity) >= äldreÄn {
             await hämtaMejl()
-        } else if cache.bilagor.isEmpty {
-            // Mejlen kan vara färska men hämtade innan bilagorna fanns med.
-            // Då ska bilagorna hämtas för sig, inte vänta på att cachen
-            // åldras ut.
-            await hämtaBilagor(Array(adresser))
-            mejlLäge = .klar
+        }
+    }
+
+    private var spelarIn: Bool {
+        switch session.läge {
+        case .förbereder, .spelarIn, .avslutar: true
+        default: false
         }
     }
 
     private func hämtaMejl() async {
-        // Timern, återkomsten till appen och knappen kan alla vilja hämta.
-        // Två sökningar samtidigt skrev tidigare över varandras resultat.
+        // Återkomsten till appen och knappen kan båda vilja hämta. Två
+        // sökningar samtidigt skrev tidigare över varandras resultat.
         if case .hämtar = mejlLäge { return }
         let adresser = Array(Set(arkiv.kontakter(för: kund).flatMap(\.epost))).prefix(5)
         guard !adresser.isEmpty else { return }
         mejlLäge = .hämtar("Söker i Mail …")
-        let mailen = Mailen()
-        var samlat: [Mailen.Mejl] = []
+        let svar: Mailen.Svar
         do {
-            for a in adresser { samlat += try await mailen.sök(adress: a, max: 20) }
+            svar = try await Mailen.sökEnGång(adresser: Array(adresser),
+                                              bilagor: kund.mailmapp.appending(path: "Bilagor"))
         } catch {
             mejlLäge = .fel(error.localizedDescription)
             return
         }
-        var sedda = Set<String>()
-        mejl = samlat.filter { sedda.insert($0.id).inserted }
-            .sorted { ($0.datum ?? .distantPast) > ($1.datum ?? .distantPast) }
+        mejl = svar.mejl
         try? arkiv.sparaMail(mejl, bilagor: bilagor, för: kund)
 
-        await hämtaBilagor(Array(adresser))
+        await läsBilagor(svar.bilagor)
         mejlLäge = .klar
     }
 
-    private func hämtaBilagor(_ adresser: [String]) async {
-        let skript = URL(fileURLWithPath: Bundle.main.bundlePath)
-            .appending(path: "Contents/Resources/mail-bilagor.applescript")
-        guard FileManager.default.fileExists(atPath: skript.path) else {
-            mejlLäge = .fel("Skriptet som hämtar bilagor saknas i appen.")
-            return
-        }
-
-        mejlLäge = .hämtar("Hämtar bilagor …")
-        let mapp = kund.mailmapp.appending(path: "Bilagor")
-        var hittade: [Bilagor.Bilaga] = []
-        for a in adresser {
-            do {
-                hittade += try await Bilagor.hämta(adress: a, till: mapp, skript: skript)
-            } catch {
-                // Ett tyst misslyckande här var orsaken till att bilagorna
-                // aldrig dök upp: felet syntes ingenstans.
-                mejlLäge = .fel("Bilagorna kunde inte hämtas: \(error.localizedDescription)")
-                return
-            }
-        }
-        var sedda = Set<String>()
-        hittade = hittade.filter { sedda.insert($0.fil).inserted }
+    /// Plockar ut texten ur bilagorna som sökningen sparade.
+    private func läsBilagor(_ sparade: [Bilagor.Bilaga]) async {
+        var hittade = sparade
         guard !hittade.isEmpty else { return }
 
         // Text som redan lästs ut behålls: bildtolkningen tar sekunder per

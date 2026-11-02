@@ -23,7 +23,6 @@ cp Resources/Kundkoll.icns "$APP/Contents/Resources/Kundkoll.icns"
 # Röstanalysen körs som en Pythonprocess; skriptet måste följa med appen.
 cp scripts/rostanalys.py "$APP/Contents/Resources/rostanalys.py"
 cp Resources/mail-sok.applescript "$APP/Contents/Resources/mail-sok.applescript"
-cp Resources/mail-bilagor.applescript "$APP/Contents/Resources/mail-bilagor.applescript"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 echo "→ signerar"

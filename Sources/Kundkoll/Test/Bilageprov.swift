@@ -17,9 +17,9 @@ enum Bilageprov {
     static func hämtning(adress: String, mapp: String?) async -> Int32 {
         Prov.svit("Bilagehämtning")
         let skript = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-            .appending(path: "Resources/mail-bilagor.applescript")
+            .appending(path: "Resources/mail-sok.applescript")
         let iBundel = URL(fileURLWithPath: Bundle.main.bundlePath)
-            .appending(path: "Contents/Resources/mail-bilagor.applescript")
+            .appending(path: "Contents/Resources/mail-sok.applescript")
         let använd = FileManager.default.fileExists(atPath: iBundel.path) ? iBundel : skript
 
         print("skript: \(använd.path)")
@@ -28,7 +28,10 @@ enum Bilageprov {
         let mål = URL(fileURLWithPath: mapp ?? FileManager.default.temporaryDirectory
             .appending(path: "kundkoll-bilagor-\(UUID().uuidString)").path)
         do {
-            let hittade = try await Bilagor.hämta(adress: adress, till: mål, skript: använd)
+            let t0 = Date()
+            let svar = try await Mailen(skript: använd).sök(adresser: [adress], bilagor: mål)
+            let hittade = svar.bilagor
+            print("\(svar.mejl.count) mejl på \(String(format: "%.1f", Date().timeIntervalSince(t0))) s")
             print("\n\(hittade.count) bilagor sparade i \(mål.path)")
             Prov.kolla(!hittade.isEmpty, "bilagor hämtades")
 

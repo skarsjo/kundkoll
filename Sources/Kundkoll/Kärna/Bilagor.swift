@@ -60,27 +60,9 @@ enum Bilagor {
         return true
     }
 
-    // MARK: - Hämta
+    // MARK: - Tolka
 
-    /// Sparar bilagor från mejl till eller från en adress.
-    static func hämta(adress: String, till mapp: URL, max antal: Int = 40,
-                      skript: URL) async throws -> [Bilaga] {
-        try FileManager.default.createDirectory(at: mapp, withIntermediateDirectories: true)
-
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        p.arguments = [skript.path, adress, mapp.path, String(antal)]
-        let utfall = try await Underprocess.kör(p, tidsgräns: 10 * 60)
-
-        guard utfall.kod == 0 else {
-            let text = utfall.feltext
-            throw text.contains("not allowed") || text.contains("-1743")
-                ? Fel.nekad
-                : Fel.frånMail(text)
-        }
-        return tolka(utfall.uttext, inom: mapp)
-    }
-
+    /// Raderna kommer från `mail-sok.applescript`, se `Mailen.sök`.
     /// - Parameter inom: mappen bilagorna ska ligga i. Filnamnet kommer från
     ///   avsändaren, och ett namn med snedstreck eller punkt-punkt får inte
     ///   peka någon annanstans. Skriptet rensar namnet; det här är bältet
@@ -95,18 +77,6 @@ enum Bilagor {
                 return nil
             }
             return Bilaga(ämne: f[0], namn: f[1], fil: väg, storlek: storlek)
-        }
-    }
-
-    enum Fel: LocalizedError {
-        case nekad, frånMail(String)
-        var errorDescription: String? {
-            switch self {
-            case .nekad:
-                "\(Appnamn.visat) får inte styra Mail. Ge tillstånd i Systeminställningar → Integritet och säkerhet → Automatisering."
-            case .frånMail(let f):
-                f.isEmpty ? "Mail svarade med ett fel." : "Mail svarade: \(f)"
-            }
         }
     }
 
