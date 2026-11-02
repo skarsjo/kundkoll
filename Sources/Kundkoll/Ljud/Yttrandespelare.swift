@@ -23,6 +23,8 @@ final class Yttrandespelare: ObservableObject {
     private var yttranden: [Yttrande] = []
     private var klocka: Timer?
     private var startade = Date.distantPast
+    /// Var uppspelningen stannar av sig själv, när bara en rad ska höras.
+    private var stopp: Double?
 
     /// Vilka spår ett möte har. Tvåspåriga inspelningar har mitt ljud för
     /// sig; i en importerad fil ligger alla röster i motpart. Ett färdigt
@@ -62,6 +64,7 @@ final class Yttrandespelare: ObservableObject {
     }
 
     func pausa() {
+        stopp = nil
         for p in spelare { p.pause() }
         klocka?.invalidate()
         klocka = nil
@@ -77,7 +80,9 @@ final class Yttrandespelare: ObservableObject {
     }
 
     /// Spelar från radens början — eller pausar, om det är just den som hörs.
-    func växla(_ y: Yttrande) {
+    /// - Parameter bara: stanna när raden är slut. För att känna igen en röst
+    ///   räcker raden; att mötet rullar vidare in i nästa talare stör.
+    func växla(_ y: Yttrande, bara: Bool = false) {
         if aktuell == y.id && igång {
             pausa()
             return
@@ -85,6 +90,7 @@ final class Yttrandespelare: ObservableObject {
         pausa()
         tid = max(0, y.start)
         spela()
+        stopp = bara ? y.slut : nil
     }
 
     func sluta() {
@@ -110,6 +116,10 @@ final class Yttrandespelare: ObservableObject {
             return
         }
         tid = första.currentTime
+        if let stopp, tid >= stopp {
+            pausa()
+            return
+        }
         let ny = Self.rad(vid: tid, i: yttranden)
         if ny != aktuell { aktuell = ny }
     }

@@ -15,6 +15,8 @@ struct Transkriptvy: View {
     @EnvironmentObject private var arkiv: Arkivet
 
     @State private var visaRöster = false
+    /// Rösten man klickade på i transkriptet, så att bladet öppnas vid den.
+    @State private var röstfokus: Int?
     @State private var visaChatt = Inställningar.mötesChattPå
     @State private var flik: Flik = .sammanfattning
     @State private var uppgifter: [Uppgift] = []
@@ -102,7 +104,7 @@ struct Transkriptvy: View {
         // En omkörning i bakgrunden skriver möte.json; vyn ska följa med.
         .onChange(of: arkiv.sparningar) { läsOmFrånDisk() }
         .sheet(isPresented: $visaRöster) {
-            Röstvy(kund: kund, mapp: mapp, inspelning: inspelning) { inspelning = $0 }
+            Röstvy(kund: kund, mapp: mapp, inspelning: inspelning, fokus: röstfokus) { inspelning = $0 }
         }
         .sheet(item: $redigerad) { u in
             Uppgiftsredigering(uppgift: u, kund: kund, vidSparat: läsUppgifter)
@@ -134,6 +136,7 @@ struct Transkriptvy: View {
             // angivet antal.
             if inspelning.yttranden.contains(where: { $0.röst == .motpart }) {
                 Button {
+                    röstfokus = nil
                     visaRöster = true
                 } label: {
                     Label("Vem är vem", systemImage: "person.wave.2")
@@ -322,9 +325,7 @@ struct Transkriptvy: View {
         let hörs = spelare.aktuell == y.id
         return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
-                Text(y.etikett(inspelning.röstnamn, enspårig: inspelning.enspårig))
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(färg(y))
+                röstetikett(y)
                 Text(y.tidsstämpel)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.tertiary)
@@ -350,6 +351,26 @@ struct Transkriptvy: View {
         .background(hörs ? Color.accentColor.opacity(0.10) : Color.clear,
                     in: .rect(cornerRadius: 6))
         .onHover { över in hovrad = över ? y.id : (hovrad == y.id ? nil : hovrad) }
+    }
+
+    /// Namnet på en motpartsröst är en knapp: den som läser och känner igen
+    /// rösten ska kunna sätta namnet där, utan att leta upp den i bladet.
+    @ViewBuilder
+    private func röstetikett(_ y: Yttrande) -> some View {
+        let text = Text(y.etikett(inspelning.röstnamn, enspårig: inspelning.enspårig))
+            .font(.caption.weight(.medium))
+            .foregroundStyle(färg(y))
+        if y.röst == .motpart, let g = y.röstgrupp {
+            Button {
+                spelare.pausa()
+                röstfokus = g
+                visaRöster = true
+            } label: { text }
+            .buttonStyle(.plain)
+            .help(inspelning.röstnamn[g] == nil ? "Sätt namn på rösten" : "Byt namn på rösten")
+        } else {
+            text
+        }
     }
 
     /// Spelaren längst ned i transkriptfliken: spela, pausa, dra i tiden.
@@ -594,7 +615,7 @@ struct Transkriptvy: View {
     /// Egen färg per röst, så att man ser talarbyten utan att läsa namnen.
     private func färg(_ y: Yttrande) -> Color {
         guard y.röst == .motpart || inspelning.enspårig else { return .blue }
-        let paletten: [Color] = [.purple, .orange, .teal, .pink, .indigo, .brown]
+        let paletten: [Color] = [.purple, .orange, .teal, .pink, .indigo, .brown, .green, .red, .mint, .cyan]
         guard let g = y.röstgrupp else { return .purple }
         return paletten[g % paletten.count]
     }

@@ -9,6 +9,8 @@ struct Röstvy: View {
     let kund: Kund
     let mapp: URL
     @State var inspelning: Inspelning
+    /// Rösten man klickade på i transkriptet: den visas utfälld och överst.
+    var fokus: Int? = nil
     var vidSparat: (Inspelning) -> Void
 
     @EnvironmentObject private var arkiv: Arkivet
@@ -19,6 +21,25 @@ struct Röstvy: View {
     @State private var kontakter: [Kontakt] = []
     @State private var grupperarOm = false
     @State private var omfel: String?
+    @State private var filter: Filter = .alla
+    /// Röster vars repliker visas i sin helhet, inte bara det längsta provet.
+    @State private var utfällda: Set<Int> = []
+    @StateObject private var spelare = Yttrandespelare()
+
+    /// Med många röster vill man se de som återstår, eller kolla de som
+    /// redan fått namn. Filtret går på det sparade, så att en rad inte
+    /// försvinner mitt i att man skriver namnet.
+    private enum Filter: String, CaseIterable, Identifiable {
+        case alla, utanNamn, namngivna
+        var id: String { rawValue }
+        var namn: String {
+            switch self {
+            case .alla: "Alla"
+            case .utanNamn: "Utan namn"
+            case .namngivna: "Med namn"
+            }
+        }
+    }
 
     /// Hur väl en röst liknar de kända, bäst först. Avtrycket sparas med
     /// mötet; äldre möten saknar det tills de grupperas om.
@@ -64,6 +85,25 @@ struct Röstvy: View {
             .sorted { $0.2 > $1.2 }
     }
 
+    private var synliga: [(grupp: Int, turer: Int, sekunder: Double, exempel: String)] {
+        let urval = grupper.filter { g in
+            switch filter {
+            case .alla: true
+            case .utanNamn: inspelning.röstnamn[g.grupp] == nil
+            case .namngivna: inspelning.röstnamn[g.grupp] != nil
+            }
+        }
+        guard let fokus, let i = urval.firstIndex(where: { $0.grupp == fokus }) else { return urval }
+        return [urval[i]] + urval.enumerated().filter { $0.offset != i }.map(\.element)
+    }
+
+    /// Rösternas repliker i tidsordning, för att höra och läsa mer än ett prov.
+    private func repliker(_ grupp: Int) -> [Yttrande] {
+        inspelning.yttranden
+            .filter { $0.röst == .motpart && $0.röstgrupp == grupp }
+            .sorted { $0.start < $1.start }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
@@ -75,6 +115,12 @@ struct Röstvy: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
+                    Picker("", selection: $filter) {
+                        ForEach(Filter.allCases) { f in Text(f.namn).tag(f) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
                 }
                 if let varning = inspelning.röstvarning {
                     Label(varning, systemImage: "exclamationmark.triangle")
@@ -93,6 +139,15 @@ struct Röstvy: View {
                             .buttonStyle(.bordered)
                             .disabled(grupperarOm)
                     }
+                    // Stora möten är ovanliga men finns: nio i ett rum
+                    // hände. Knapparna räcker för det vanliga, resten i en meny.
+                    Menu("Fler") {
+                        ForEach(7...15, id: \.self) { n in
+                            Button("\(n) röster") { grupperaOm(antal: n) }
+                        }
+                    }
+                    .fixedSize()
+                    .disabled(grupperarOm)
                     Button("Låt appen avgöra") { grupperaOm(antal: nil) }
                         .buttonStyle(.borderless)
                         .disabled(grupperarOm)
@@ -107,8 +162,14 @@ struct Röstvy: View {
 
             ScrollView {
                 VStack(spacing: 14) {
-                    ForEach(grupper, id: \.grupp) { g in
+                    ForEach(synliga, id: \.grupp) { g in
                         rad(g)
+                    }
+                    if synliga.isEmpty && !grupper.isEmpty {
+                        Text(filter == .utanNamn ? "Alla röster har namn." : "Ingen röst har namn än.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 20)
                     }
                 }
                 .padding(16)
@@ -127,12 +188,15 @@ struct Röstvy: View {
             }
             .padding(16)
         }
-        .frame(width: 660, height: 520)
+        .frame(width: 660, height: 600)
         .onAppear {
             namn = inspelning.röstnamn
             profiler = arkiv.röstprofiler(för: kund)
             kontakter = arkiv.kontakter(för: kund)
+            if let fokus { utfällda.insert(fokus) }
+            spelare.ladda(mapp: mapp, inspelning: inspelning)
         }
+        .onDisappear { spelare.sluta() }
     }
 
     private func rad(_ g: (grupp: Int, turer: Int, sekunder: Double, exempel: String)) -> some View {
@@ -151,10 +215,24 @@ struct Röstvy: View {
                         .background(.green.opacity(0.2), in: .capsule)
                 }
             }
-            Text("«\(g.exempel.prefix(120))»")
+            // Ett prov räcker sällan när många talar. Klicket fäller ut
+            // rösternas repliker, var och en spelbar.
+            Button {
+                if utfällda.contains(g.grupp) { utfällda.remove(g.grupp) } else { utfällda.insert(g.grupp) }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: utfällda.contains(g.grupp) ? "chevron.down" : "chevron.right")
+                        .font(.caption2)
+                    Text(utfällda.contains(g.grupp) ? "Dölj replikerna" : "«\(g.exempel.prefix(120))»")
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 .font(.callout)
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help(utfällda.contains(g.grupp) ? "Dölj replikerna" : "Visa alla repliker från rösten")
+            if utfällda.contains(g.grupp) { replikerna(g.grupp) }
 
             // Likheten mot de kända rösterna, i procent. Grönt är över
             // tröskeln för automatisk namngivning, orange är troligt men
@@ -206,6 +284,39 @@ struct Röstvy: View {
         }
         .padding(12)
         .kort(hörn: Stil.radhörn)
+        .overlay {
+            if fokus == g.grupp {
+                RoundedRectangle(cornerRadius: Stil.radhörn).stroke(Color.accentColor, lineWidth: 1.5)
+            }
+        }
+    }
+
+    private func replikerna(_ grupp: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(repliker(grupp)) { y in
+                let hörs = spelare.aktuell == y.id && spelare.igång
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Button {
+                        spelare.växla(y, bara: true)
+                    } label: {
+                        Image(systemName: hörs ? "pause.fill" : "play.fill")
+                            .font(.system(size: 9))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(hörs ? Color.accentColor : Color.secondary)
+                    .disabled(!spelare.harLjud)
+                    .help(hörs ? "Pausa" : "Lyssna på repliken")
+                    Text(y.tidsstämpel)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                    Text(y.text)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(.leading, 18)
     }
 
     /// Kör om uppdelningen med ett angivet antal röster.
@@ -216,6 +327,7 @@ struct Röstvy: View {
             do {
                 inspelning = try await arkiv.grupperaOm(inspelning, i: mapp, antal: antal)
                 namn = inspelning.röstnamn
+                spelare.ladda(mapp: mapp, inspelning: inspelning)
                 vidSparat(inspelning)
             } catch {
                 omfel = error.localizedDescription
