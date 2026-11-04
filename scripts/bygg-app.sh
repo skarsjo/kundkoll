@@ -28,6 +28,17 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 echo "→ signerar"
 # En stabil signatur gör att macOS kommer ihåg beviljade behörigheter
 # mellan ombyggen i stället för att fråga om mikrofon och skärminspelning varje gång.
+# Finns inte det angivna certifikatet tas det första giltiga i nyckelringen,
+# till exempel ett gratis «Apple Development» — vilket som helst som är
+# stabilt duger. Ad hoc ger en ny identitet vid varje bygge, och då frågar
+# macOS om skärminspelning och Full Disk Access på nytt varje gång.
+if ! security find-identity -v -p codesigning | grep -q "$IDENTITET"; then
+    FORSTA="$(security find-identity -v -p codesigning | sed -n 's/.*"\(.*\)".*/\1/p' | head -1)"
+    if [ -n "$FORSTA" ]; then
+        IDENTITET="$FORSTA"
+        echo "  (signerar med $IDENTITET)"
+    fi
+fi
 if security find-identity -v -p codesigning | grep -q "$IDENTITET"; then
     codesign --force --deep --options runtime --timestamp=none \
         --entitlements Resources/Kundkoll.entitlements \

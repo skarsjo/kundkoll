@@ -58,7 +58,9 @@ enum Mejlregisterprov {
                         .sök(adresser: [adress], bilagor: mapp.appending(path: "as"))
                 } catch {
                     print("Gick inte: \(error.localizedDescription)")
-                    print("(Kör från kundkoll-mappen, så att Resources/mail-sok.applescript hittas.)")
+                    if !FileManager.default.fileExists(atPath: skript.path) {
+                        print("(Kör från kundkoll-mappen, så att Resources/mail-sok.applescript hittas.)")
+                    }
                     Prov.kolla(false, "AppleScript-vägen gick att jämföra med")
                     return Prov.sammanfatta()
                 }
