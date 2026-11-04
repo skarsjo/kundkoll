@@ -44,8 +44,24 @@ enum Mejlregisterprov {
 
             if jämför {
                 print("\nAppleScript-vägen (Mail kan bli upptaget en stund) …")
+                // Från .build ligger skriptet inte i någon appbundel; då tas
+                // det ur källträdet, som --prov-bilagehämtning gör.
+                let iBundel = URL(fileURLWithPath: Bundle.main.bundlePath)
+                    .appending(path: "Contents/Resources/mail-sok.applescript")
+                let iKällan = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                    .appending(path: "Resources/mail-sok.applescript")
+                let skript = FileManager.default.fileExists(atPath: iBundel.path) ? iBundel : iKällan
                 let t1 = Date()
-                let gammalt = try await Mailen().sök(adresser: [adress], bilagor: mapp.appending(path: "as"))
+                let gammalt: Mailen.Svar
+                do {
+                    gammalt = try await Mailen(skript: skript)
+                        .sök(adresser: [adress], bilagor: mapp.appending(path: "as"))
+                } catch {
+                    print("Gick inte: \(error.localizedDescription)")
+                    print("(Kör från kundkoll-mappen, så att Resources/mail-sok.applescript hittas.)")
+                    Prov.kolla(false, "AppleScript-vägen gick att jämföra med")
+                    return Prov.sammanfatta()
+                }
                 print(String(format: "AppleScript: %.1f s, %d mejl, %d bilagor",
                              Date().timeIntervalSince(t1), gammalt.mejl.count, gammalt.bilagor.count))
                 let nya = Set(svar.mejl.map(\.id))
