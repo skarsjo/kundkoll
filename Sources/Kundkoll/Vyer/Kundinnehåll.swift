@@ -614,7 +614,7 @@ struct Kundinnehåll: View {
     private func visaMejl(äldreÄn: TimeInterval = 30 * 60) async {
         // Kontakterna läses här och inte ur vyns tillstånd: den fylls av
         // onAppear, som kan hinna köra efter den här uppgiften.
-        let adresser = Array(Set(arkiv.kontakter(för: kund).flatMap(\.epost))).prefix(5)
+        let adresser = arkiv.sökbaraAdresser(för: kund)
         guard !adresser.isEmpty else { return }
 
         let cache = arkiv.mailcache(för: kund)
@@ -645,7 +645,7 @@ struct Kundinnehåll: View {
         // Återkomsten till appen och knappen kan båda vilja hämta. Två
         // sökningar samtidigt skrev tidigare över varandras resultat.
         if case .hämtar = mejlLäge { return }
-        let adresser = Array(Set(arkiv.kontakter(för: kund).flatMap(\.epost))).prefix(5)
+        let adresser = arkiv.sökbaraAdresser(för: kund)
         guard !adresser.isEmpty else { return }
         mejlLäge = .hämtar("Söker i Mail …")
         let svar: Mailen.Svar

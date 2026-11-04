@@ -38,6 +38,10 @@ struct Modellvy: View {
     @State private var provar = false
     @State private var insiktsmodell = Inställningar.insiktsmodell
     @State private var delaRöster = Inställningar.delaRöstprofiler
+    /// Råtexten i teamfälten. Tolkas först när man sparar: tolkades den
+    /// medan man skrev försvann kommatecknet innan nästa adress hann komma.
+    @State private var domäntext = Arkivet.shared.team().domäntext
+    @State private var kollegatext = Arkivet.shared.team().kollegatext
     @State private var automatiska = Inställningar.automatiskaModellanrop
     @State private var transkribering = Transkriberingsval.läs()
     @State private var elevenNyckel = ""
@@ -380,6 +384,38 @@ struct Modellvy: View {
                 }
             }
         }
+        teamfält
+    }
+
+    // MARK: - Teamet
+
+    /// Kollegorna och den egna domänen. Ligger under rösterna eftersom det
+    /// är där det märks mest: en kollegas röst känns igen hos alla kunder.
+    @ViewBuilder
+    private var teamfält: some View {
+        fält("Egen domän") {
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("rackfish.com", text: $domäntext)
+                    .textFieldStyle(.roundedBorder)
+                Text("Adresser på den egna domänen söks inte i Mail: de matchar en stor del "
+                     + "av all post och säger inget om kunden.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        fält("Kollegor") {
+            VStack(alignment: .leading, spacing: 6) {
+                TextEditor(text: $kollegatext)
+                    .font(.callout)
+                    .frame(height: 90)
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(.quaternary))
+                Text("En per rad: namn, sedan e-post. Till exempel «Martin Malmgren, "
+                     + "martin.malmgren@rackfish.com». En kollega som får namn i «Vem är vem» "
+                     + "känns igen i alla kunders möten, och läggs inte upp som kontakt hos kunden.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     // MARK: - Lagring
@@ -720,6 +756,10 @@ struct Modellvy: View {
         let ren = insiktsmodell.trimmingCharacters(in: .whitespacesAndNewlines)
         Inställningar.insiktsmodell = ren.isEmpty ? Insikter.standardmodell : ren
         Inställningar.delaRöstprofiler = delaRöster
+        var team = Team()
+        team.domäntext = domäntext
+        team.kollegatext = kollegatext
+        try? Arkivet.shared.sparaTeam(team)
         Inställningar.automatiskaModellanrop = automatiska
         Inställningar.whisperRot = whisperRot
         Inställningar.pythonMiljö = pythonMiljö

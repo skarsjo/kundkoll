@@ -19,6 +19,7 @@ struct Röstvy: View {
     @State private var namn: [Int: String] = [:]
     @State private var profiler: [Röstprofil] = []
     @State private var kontakter: [Kontakt] = []
+    @State private var team = Team()
     @State private var grupperarOm = false
     @State private var omfel: String?
     @State private var filter: Filter = .alla
@@ -62,6 +63,9 @@ struct Röstvy: View {
         // De som var kallade till just det här mötet: de är de troligaste.
         for n in inspelning.kallade where !ut.contains(where: { $0.namn == n }) { ut.append((n, n)) }
         for k in kontakter where !ut.contains(where: { $0.namn == k.namn }) { ut.append((k.namn, k.namn)) }
+        for k in team.kollegor where !ut.contains(where: { $0.namn == k.namn }) {
+            ut.append((k.namn, "\(k.namn) · kollega"))
+        }
         for p in profiler where !ut.contains(where: { $0.namn == p.namn }) { ut.append((p.namn, p.namn)) }
         return ut
     }
@@ -193,6 +197,7 @@ struct Röstvy: View {
             namn = inspelning.röstnamn
             profiler = arkiv.röstprofiler(för: kund)
             kontakter = arkiv.kontakter(för: kund)
+            team = arkiv.team()
             if let fokus { utfällda.insert(fokus) }
             spelare.ladda(mapp: mapp, inspelning: inspelning)
         }
@@ -358,8 +363,9 @@ struct Röstvy: View {
         }
         // En person man satt namn på hör till kunden. Att behöva lägga upp
         // hen en gång till som kontakt vore onödigt dubbelarbete.
+        // En kollega hör inte till kunden.
         for personnamn in Set(inspelning.röstnamn.values)
-        where !kontakter.contains(where: { $0.namn == personnamn }) {
+        where !kontakter.contains(where: { $0.namn == personnamn }) && !team.ärKollega(personnamn) {
             try? arkiv.läggTill(Kontakt(namn: personnamn), hos: kund)
         }
 

@@ -914,6 +914,9 @@ final class Arkivet: ObservableObject {
                 alla += egnaRöstprofiler(för: annan).filter { !egna.contains($0.namn) }
             }
         }
+        // Kollegorna är med hos alla kunder, delning eller inte.
+        let kända = Set(alla.map(\.namn))
+        alla += teamprofiler().filter { !kända.contains($0.namn) }
         return alla.sorted { $0.namn.localizedStandardCompare($1.namn) == .orderedAscending }
     }
 
@@ -934,8 +937,10 @@ final class Arkivet: ObservableObject {
 
     /// Lägger ett nytt avtryck till rätt person, eller skapar personen.
     func lärDigRöst(namn: String, avtryck: Avtryck, hos kund: Kund) throws {
-        // Lärs alltid in hos den egna kunden, även när delning är påslagen.
-        var profiler = egnaRöstprofiler(för: kund)
+        // En kollega lärs in i teamet, så att hen känns igen hos alla kunder.
+        // Alla andra lärs in hos den egna kunden, även när delning är påslagen.
+        let kollega = team().ärKollega(namn)
+        var profiler = kollega ? teamprofiler() : egnaRöstprofiler(för: kund)
         if let i = profiler.firstIndex(where: { $0.namn == namn }) {
             profiler[i].lärDig(avtryck)
             profiler[i].samtal += 1
@@ -943,7 +948,11 @@ final class Arkivet: ObservableObject {
             profiler.append(Röstprofil(namn: namn, avtryck: [avtryck],
                                        uppdaterad: Date(), samtal: 1))
         }
-        try sparaRöstprofiler(profiler, för: kund)
+        if kollega {
+            try sparaTeamprofiler(profiler)
+        } else {
+            try sparaRöstprofiler(profiler, för: kund)
+        }
     }
 
     // MARK: - Skriva inspelning

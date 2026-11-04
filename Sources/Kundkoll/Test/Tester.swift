@@ -34,6 +34,7 @@ enum Tester {
         kontakterOchKalender()
         mailen()
         mejlregistret()
+        teamet()
         anteckningar()
         obsidian()
         kunskapsbanken()
