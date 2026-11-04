@@ -33,6 +33,7 @@ enum Tester {
         röster()
         kontakterOchKalender()
         mailen()
+        mejlregistret()
         anteckningar()
         obsidian()
         kunskapsbanken()

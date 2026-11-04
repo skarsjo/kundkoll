@@ -397,6 +397,7 @@ fönstret först, gör flera försök, och faller tillbaka på hela skärmen.
 .build/arm64-apple-macosx/debug/Kundkoll --prov-transkribering f.wav [motor] [modell]
 .build/arm64-apple-macosx/debug/Kundkoll --prov-läget <kund> <projekt>   # lägesbilden skarpt
 .build/arm64-apple-macosx/debug/Kundkoll --prov-bilagehämtning <adress> [mapp]
+.build/arm64-apple-macosx/debug/Kundkoll --prov-mejlregister <adress> [--jämför]   # Mails register, kräver Full Disk Access
 .build/arm64-apple-macosx/debug/Kundkoll --transkribera-om <mapp> [sv|en|auto]
 ```
 

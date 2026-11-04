@@ -128,6 +128,16 @@ struct Ingång {
             sem.wait()
             exit(kod)
         }
+        if let i = CommandLine.arguments.firstIndex(of: "--prov-mejlregister"),
+           i + 1 < CommandLine.arguments.count {
+            let a = CommandLine.arguments
+            let jämför = a.contains("--jämför")
+            let sem = DispatchSemaphore(value: 0)
+            nonisolated(unsafe) var kod: Int32 = 1
+            Task.detached { kod = await Mejlregisterprov.kör(adress: a[i + 1], jämför: jämför); sem.signal() }
+            sem.wait()
+            exit(kod)
+        }
         if let i = CommandLine.arguments.firstIndex(of: "--prov-bilagehämtning"),
            i + 1 < CommandLine.arguments.count {
             let a = CommandLine.arguments

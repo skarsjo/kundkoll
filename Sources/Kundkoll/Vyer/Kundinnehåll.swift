@@ -24,6 +24,8 @@ struct Kundinnehåll: View {
     @State private var mejl: [Mailen.Mejl] = []
     @State private var bilagor: [Bilagor.Bilaga] = []
     @State private var mejlLäge: Mejlläge = .ejHämtat
+    /// Varför senaste sökningen fick gå via Mail i stället för registret.
+    @State private var registerfel: Mejlregistret.Fel?
 
     @State private var visaNyttProjekt = false
     @State private var nyttProjektnamn = ""
@@ -422,6 +424,7 @@ struct Kundinnehåll: View {
 
     private var mejlavsnitt: some View {
         avsnitt("Mail", knapp: mejlknapp) {
+            if let registerfel { registerruta(registerfel) }
             switch mejlLäge {
             case .ejHämtat:
                 Text(kontakter.flatMap(\.epost).isEmpty
@@ -654,10 +657,31 @@ struct Kundinnehåll: View {
             return
         }
         mejl = svar.mejl
+        registerfel = svar.registerfel
         try? arkiv.sparaMail(mejl, bilagor: bilagor, för: kund)
 
         await läsBilagor(svar.bilagor)
         mejlLäge = .klar
+    }
+
+    /// Sökningen gick via Mail, som blir upptaget medan den pågår. Säger
+    /// varför, och hur man får den snabba vägen.
+    private func registerruta(_ fel: Mejlregistret.Fel) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if fel == .saknarBehörighet {
+                Text("Sökningen gick via Mail, som är upptaget medan den pågår. Med Full Disk "
+                     + "Access läser \(Appnamn.visat) Mails register direkt: det tar sekunder "
+                     + "och märks inte i Mail. Starta om appen när rättigheten är given.")
+                Button("Öppna Full Disk Access …") { NSWorkspace.shared.open(Mejlregistret.behörighetsruta) }
+            } else {
+                Text("Mails register gick inte att läsa, så sökningen gick via Mail: "
+                     + (fel.errorDescription ?? ""))
+            }
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.bottom, 6)
     }
 
     /// Plockar ut texten ur bilagorna som sökningen sparade.

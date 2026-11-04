@@ -96,7 +96,13 @@ actor Mailen {
     struct Svar {
         var mejl: [Mejl]
         var bilagor: [Bilagor.Bilaga]
+        /// Vilken väg svaret kom: registret eller AppleScript mot Mail.
+        var väg: Väg = .mail
+        /// Varför registret inte gick att använda, när svaret kom från Mail.
+        var registerfel: Mejlregistret.Fel?
     }
+
+    enum Väg { case registret, mail }
 
     /// Mejl till eller från en kunds adresser, och bilagorna i dem.
     ///
@@ -152,7 +158,21 @@ actor Mailen {
         let före = senaste
         let uppgift = Task<Svar, Error> {
             _ = try? await före?.value
-            return try await Mailen().sök(adresser: adresser, bilagor: mapp)
+            // Registret först: det svarar på sekunder och rör inte Mail.
+            // AppleScript-vägen finns kvar för den som inte gett Full Disk
+            // Access, eller om registret ser ut på ett sätt vi inte känner.
+            let registret = await Task.detached(priority: .utility) {
+                Result { try Mejlregistret.sök(adresser: adresser, bilagor: mapp) }
+            }.value
+            switch registret {
+            case .success(var svar):
+                svar.väg = .registret
+                return svar
+            case .failure(let fel):
+                var svar = try await Mailen().sök(adresser: adresser, bilagor: mapp)
+                svar.registerfel = fel as? Mejlregistret.Fel ?? .kanInteÖppna(fel.localizedDescription)
+                return svar
+            }
         }
         pågående[nyckel] = uppgift
         senaste = uppgift
