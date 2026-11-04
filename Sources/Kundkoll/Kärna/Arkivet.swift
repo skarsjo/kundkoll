@@ -904,11 +904,13 @@ final class Arkivet: ObservableObject {
     /// Kända röster hos en kund. Ligger hos kunden och inte globalt: samma
     /// person kan förekomma hos flera kunder, och profilerna ska inte läcka
     /// mellan kundärenden.
-    func röstprofiler(för kund: Kund) -> [Röstprofil] {
+    /// - Parameter dela: om andra kunders profiler räknas. Inställningen
+    ///   gäller; proven anger den själva, så att de inte beror på den.
+    func röstprofiler(för kund: Kund, dela: Bool = Inställningar.delaRöstprofiler) -> [Röstprofil] {
         var alla = egnaRöstprofiler(för: kund)
         // Med delning påslagen räknas även andra kunders profiler, men kundens
         // egna går först: samma namn där vinner.
-        if Inställningar.delaRöstprofiler {
+        if dela {
             let egna = Set(alla.map(\.namn))
             for annan in kunder where annan.namn != kund.namn {
                 alla += egnaRöstprofiler(för: annan).filter { !egna.contains($0.namn) }

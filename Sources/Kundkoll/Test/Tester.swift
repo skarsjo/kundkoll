@@ -1329,7 +1329,8 @@ enum Tester {
             let b = try! arkiv.skapaKund(namn: "Beta")
             try! arkiv.lärDigRöst(namn: "Anna", avtryck: Avtryck(vektor: [1, 0, 0], sekunder: 6), hos: a)
             Prov.lika(arkiv.röstprofiler(för: a).count, 1, "profilen sparas hos kunden")
-            Prov.lika(arkiv.röstprofiler(för: b).count, 0, "och läcker inte till andra kunder")
+            Prov.lika(arkiv.röstprofiler(för: b, dela: false).count, 0, "och läcker inte till andra kunder")
+            Prov.lika(arkiv.röstprofiler(för: b, dela: true).count, 1, "utom när delning är påslagen")
             try! arkiv.lärDigRöst(namn: "Anna", avtryck: Avtryck(vektor: [0, 1, 0], sekunder: 7), hos: a)
             let p = arkiv.röstprofiler(för: a).first
             Prov.lika(p?.avtryck.count, 2, "ett andra samtal lägger till ett avtryck")

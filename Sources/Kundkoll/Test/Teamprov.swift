@@ -44,10 +44,10 @@ extension Tester {
                                  avtryck: Avtryck(vektor: [1, 0, 0], sekunder: 6), hos: a)
             Prov.lika(arkiv.egnaRöstprofiler(för: a).count, 0, "kollegans röst sparas inte hos kunden")
             Prov.lika(arkiv.teamprofiler().map(\.namn), ["Martin Malmgren"], "utan i teamet")
-            Prov.kolla(arkiv.röstprofiler(för: b).contains { $0.namn == "Martin Malmgren" },
+            Prov.kolla(arkiv.röstprofiler(för: b, dela: false).contains { $0.namn == "Martin Malmgren" },
                        "och känns igen hos en annan kund")
             try arkiv.lärDigRöst(namn: "Anna", avtryck: Avtryck(vektor: [0, 1, 0], sekunder: 6), hos: a)
-            Prov.lika(arkiv.röstprofiler(för: b).map(\.namn), ["Martin Malmgren"],
+            Prov.lika(arkiv.röstprofiler(för: b, dela: false).map(\.namn), ["Martin Malmgren"],
                       "kundens egna röster läcker fortfarande inte")
 
             try arkiv.läggTill(Kontakt(namn: "Anna", epost: ["anna@acme.se", "Anna@Acme.se"]), hos: a)
