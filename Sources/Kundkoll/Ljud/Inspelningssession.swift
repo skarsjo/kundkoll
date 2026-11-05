@@ -85,6 +85,9 @@ final class Inspelningssession: ObservableObject {
         default: return
         }
         livevarning = nil
+        // Förra mötets mapp kan fortfarande efterbearbetas; ett fel i
+        // starten får inte släppa den ur `upptagna` via `städa`.
+        mapp = nil
         self.placering = placering
         self.titel = titel.isEmpty ? "Samtal" : titel
         self.mikrofonNamn = mikrofon?.namn
@@ -110,6 +113,7 @@ final class Inspelningssession: ObservableObject {
             start = Date()
             let m = try Arkivet.shared.nyInspelningsmapp(placering: placering, titel: self.titel, datum: start)
             mapp = m
+            Arkivet.shared.upptagna.insert(m)
             skrivare = [
                 .jag: try Spårskrivare(fil: m.appending(path: "jag.wav")),
                 .motpart: try Spårskrivare(fil: m.appending(path: "motpart.wav")),
@@ -230,6 +234,7 @@ final class Inspelningssession: ObservableObject {
         } catch {
             // «Sparad» får inte visas när det inte stämmer. Ljudet ligger
             // kvar, och mappen syns under Påbörjade inspelningar.
+            Arkivet.shared.upptagna.remove(mapp)
             läge = .fel("Inspelningen kunde inte sparas: \(error.localizedDescription) "
                         + "Ljudet ligger kvar i «\(mapp.lastPathComponent)» och syns under "
                         + "Påbörjade inspelningar hos kunden.")
@@ -271,6 +276,7 @@ final class Inspelningssession: ObservableObject {
                 self.efterbearbetningsfel = error.localizedDescription
                 Notiser.bearbetningFöll(inspelning, fel: error.localizedDescription)
             }
+            Arkivet.shared.upptagna.remove(mapp)
             self.efterbearbetar = false
             self.analyserarRöster = false
             self.sammanfattar = false
@@ -308,6 +314,7 @@ final class Inspelningssession: ObservableObject {
     }
 
     private func städa() async {
+        if let mapp { Arkivet.shared.upptagna.remove(mapp) }
         klocka?.invalidate(); klocka = nil
         await infångning.stoppa()
         for (_, s) in skrivare { s.stäng() }

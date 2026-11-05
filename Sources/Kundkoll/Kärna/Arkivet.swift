@@ -22,6 +22,14 @@ final class Arkivet: ObservableObject {
     /// appen startas om.
     @Published private(set) var sparningar = 0
 
+    /// Inspelningsmappar som skrivs just nu: under inspelningen och medan
+    /// efterbearbetningen pågår. Sessionen håller mappen som en fast
+    /// sökväg, och en kund som döptes om mitt i ett möte flyttade mappen
+    /// under den — vid stoppet gick möte.json inte att skriva och mötet
+    /// blev liggande som påbörjat. Namnbyten, flyttar och borttagningar
+    /// som rör en sådan mapp vägras därför tills mötet är klart.
+    var upptagna: Set<URL> = []
+
     private let fm = FileManager.default
     /// Avkodade möte.json, nycklade på ändringstid och storlek.
     private let cache = Inspelningscache()
@@ -261,6 +269,7 @@ final class Arkivet: ObservableObject {
     /// Papperskorgen och inte radering: ett samtal går inte att spela in igen,
     /// och den som råkar trycka fel ska kunna ta tillbaka det.
     func kastaInspelning(i mapp: URL) throws {
+        try kollaLedig(mapp, gör: "kasta mötet")
         try fm.trashItem(at: mapp, resultingItemURL: nil)
     }
 
@@ -1263,11 +1272,23 @@ final class Inspelningscache: @unchecked Sendable {
 /// allt som hänger på namnet skrivs om.
 extension Arkivet {
 
+    /// Kastar om ett möte skrivs någonstans i `mapp` just nu.
+    func kollaLedig(_ mapp: URL, gör: String) throws {
+        // Kön kör samma efterbearbetning, för importer, omkörningar och
+        // «Gör klart», och håller också sina mappar som fasta sökvägar.
+        let kö = Importkö.delad
+        let alla = upptagna.union([kö.aktuellMapp].compactMap { $0 } + kö.väntande.compactMap(\.mapp))
+        guard let upptagen = alla.first(where: { Self.ligger($0.path, i: mapp) }) else { return }
+        throw Enkeltfel("Det går inte att \(gör) medan mötet «\(upptagen.lastPathComponent)» "
+                        + "spelas in eller efterbearbetas. Vänta tills det är klart.")
+    }
+
     /// Byter namn på en kund.
     @discardableResult
     func döpOm(kund: Kund, till nyttNamn: String) throws -> Kund {
         let namn = städa(nyttNamn)
         guard !namn.isEmpty, namn != kund.namn else { return kund }
+        try kollaLedig(kund.mapp, gör: "byta namn på \(kund.namn)")
         let nyMapp = rot.appending(path: namn)
         guard !fm.fileExists(atPath: nyMapp.path) else {
             throw Enkeltfel("Det finns redan en kund som heter \(namn).")
@@ -1345,6 +1366,7 @@ extension Arkivet {
     /// startas om efteråt — `rot` är fast för en körning.
     func flyttaKunder(till ny: URL) throws {
         if let invändning = Self.invändning(mot: ny, nuvarande: rot) { throw Enkeltfel(invändning) }
+        try kollaLedig(rot, gör: "flytta kundmappen")
         try fm.createDirectory(at: ny, withIntermediateDirectories: true)
         let krockar = kunder.filter { fm.fileExists(atPath: ny.appending(path: $0.namn).path) }
         guard krockar.isEmpty else {
@@ -1391,6 +1413,7 @@ extension Arkivet {
 
     /// Flyttar kunden med allt innehåll till papperskorgen.
     func taBort(kund: Kund) throws {
+        try kollaLedig(kund.mapp, gör: "kasta \(kund.namn)")
         try fm.trashItem(at: kund.mapp, resultingItemURL: nil)
         cache.glömAllt()
         Uppgiftssamling.glömStämpel(för: kund.namn)
@@ -1404,6 +1427,7 @@ extension Arkivet {
     func döpOm(projekt: Projekt, hos kund: Kund, till nyttNamn: String) throws -> Projekt {
         let namn = städa(nyttNamn)
         guard !namn.isEmpty, namn != projekt.namn else { return projekt }
+        try kollaLedig(projekt.mapp, gör: "byta namn på \(projekt.namn)")
         let nyMapp = kund.projektmapp.appending(path: namn)
         guard !fm.fileExists(atPath: nyMapp.path) else {
             throw Enkeltfel("Det finns redan ett projekt som heter \(namn).")
@@ -1454,6 +1478,7 @@ extension Arkivet {
     /// papperskorgen. Uppgifterna hör till kunden och blir kvar, utan
     /// projekt.
     func taBort(projekt: Projekt, hos kund: Kund) throws {
+        try kollaLedig(projekt.mapp, gör: "kasta \(projekt.namn)")
         try fm.trashItem(at: projekt.mapp, resultingItemURL: nil)
         cache.glömAllt()
         try? sparaUppgifter(uppgifter(för: kund).map { u in
@@ -1482,6 +1507,7 @@ extension Arkivet {
                hos kund: Kund) throws -> (Inspelning, URL) {
         let titel = nyTitel.trimmingCharacters(in: .whitespaces)
         guard !titel.isEmpty, titel != inspelning.titel else { return (inspelning, mapp) }
+        try kollaLedig(mapp, gör: "byta titel på mötet")
         let stämpel = DateFormatter.mappnamn.string(from: inspelning.inledd)
         let rot = mapp.deletingLastPathComponent()
         var nyMapp = rot.appending(path: "\(stämpel) \(städa(titel))")
@@ -1520,6 +1546,7 @@ extension Arkivet {
         try fm.createDirectory(at: målrot, withIntermediateDirectories: true)
         var nyMapp = målrot.appending(path: mapp.lastPathComponent)
         guard nyMapp != mapp else { return (inspelning, mapp) }
+        try kollaLedig(mapp, gör: "flytta mötet")
         var n = 2
         while fm.fileExists(atPath: nyMapp.path) {
             nyMapp = målrot.appending(path: "\(mapp.lastPathComponent) \(n)")

@@ -575,7 +575,10 @@ struct Kundinnehåll: View {
         möteskopplingar = arkiv.möteskopplingar(för: kund)
         kontakter = arkiv.kontakter(för: kund)
         inspelningar = arkiv.inspelningar(för: kund)
+        // Mötet som spelas in just nu saknar möte.json men är inte påbörjat
+        // och övergivet; «Gör klart» och papperskorgen hör inte hemma där.
         ofullständiga = arkiv.ofullständiga(för: kund)
+            .filter { rad in !arkiv.upptagna.contains { Arkivet.ligger($0.path, i: rad.mapp) } }
     }
 
     /// Kopplade kontakter utan bild får sin profilbild ur macOS Kontakter,

@@ -2938,6 +2938,42 @@ extension Tester {
             Prov.lika(arkiv.projekt(för: ny).count, 0, "och finns inte i listan")
         }
 
+        do {   // en kund som döps om mitt i en inspelning drog undan mappen under den
+            let (arkiv, rot) = tillfälligt()
+            defer { try? fm.removeItem(at: rot) }
+            let kund = try! arkiv.odefinieradKund()
+            let p = try! arkiv.skapaProjekt(namn: "Lager", hos: kund)
+            let mapp = try! arkiv.nyInspelningsmapp(placering: .kund(kund), titel: "Samtal", datum: Date())
+            try! Data([1, 2, 3]).write(to: mapp.appending(path: "jag.wav"))
+            arkiv.upptagna.insert(mapp)
+
+            let vägrar: (String, () throws -> Void) -> Void = { vad, gör in
+                do { try gör(); Prov.kolla(false, "\(vad) vägras under inspelningen") }
+                catch { Prov.kolla("\(error)".contains("Samtal"), "\(vad) vägras och nämner mötet") }
+            }
+            vägrar("namnbyte på kunden") { _ = try arkiv.döpOm(kund: kund, till: "Lunar") }
+            vägrar("att kasta kunden") { try arkiv.taBort(kund: kund) }
+            vägrar("att kasta mötet") { try arkiv.kastaInspelning(i: mapp) }
+            let annan = fm.temporaryDirectory.appending(path: "kundkoll-ny-\(UUID().uuidString)")
+            defer { try? fm.removeItem(at: annan) }
+            vägrar("att flytta kundmappen") { try arkiv.flyttaKunder(till: annan) }
+            Prov.kolla(fm.fileExists(atPath: kund.mapp.path), "ingen kund flyttades")
+            // Projektet rymmer inte mötet och får döpas om.
+            Prov.kolla((try? arkiv.döpOm(projekt: p, hos: kund, till: "Nytt lager")) != nil,
+                       "ett projekt utan mötet döps om som vanligt")
+
+            let i = Inspelning(titel: "Samtal", inledd: Date(), längd: 5, kund: kund.namn, projekt: nil,
+                               mikrofon: nil, liveYttranden: [], arkivYttranden: nil)
+            do { try arkiv.spara(i, i: mapp) } catch { Prov.kolla(false, "mötet sparas efter inspelningen: \(error)") }
+            Prov.kolla(fm.fileExists(atPath: mapp.appending(path: "möte.json").path),
+                       "möte.json hamnar i mappen där ljudet ligger")
+
+            arkiv.upptagna.remove(mapp)
+            let ny = try! arkiv.döpOm(kund: kund, till: "Lunar")
+            Prov.lika(arkiv.inspelningar(för: ny).first?.0.kund, "Lunar",
+                      "när mötet är klart går kunden att döpa om, och mötet följer med")
+        }
+
         do {   // ett namnbyte på kontakten följer med till röst, möten och tavla
             let (arkiv, rot) = tillfälligt()
             defer { try? fm.removeItem(at: rot) }

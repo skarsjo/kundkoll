@@ -43,6 +43,7 @@ struct Huvudvy: View {
     /// Kund eller projekt som ska döpas om respektive kastas.
     @State private var namnbyte: Post?
     @State private var attKasta: Post?
+    @State private var kastfel: String?
     enum Post: Identifiable {
         case kund(Kund)
         case projekt(Projekt, Kund)
@@ -156,6 +157,10 @@ struct Huvudvy: View {
         .sheet(isPresented: $visaOm) { Omvy() }
         .onReceive(NotificationCenter.default.publisher(for: .visaOm)) { _ in visaOm = true }
         .sheet(item: $namnbyte) { post in namnblad(för: post) }
+        .alert("Gick inte att flytta till papperskorgen",
+               isPresented: Binding(get: { kastfel != nil }, set: { if !$0 { kastfel = nil } })) {
+            Button("OK") { kastfel = nil }
+        } message: { Text(kastfel ?? "") }
         .confirmationDialog(
             "Flytta till papperskorgen?",
             isPresented: Binding(get: { attKasta != nil }, set: { if !$0 { attKasta = nil } }),
@@ -256,13 +261,17 @@ struct Huvudvy: View {
 
     private func kasta(_ post: Post) {
         attKasta = nil
-        switch post {
-        case .kund(let k):
-            try? arkiv.taBort(kund: k)
-            if valdKund == k { val = arkiv.kunder.first.map { .kund($0) } }
-        case .projekt(let p, let k):
-            try? arkiv.taBort(projekt: p, hos: k)
-            if val?.projekt == p { val = .kund(k) }
+        do {
+            switch post {
+            case .kund(let k):
+                try arkiv.taBort(kund: k)
+                if valdKund == k { val = arkiv.kunder.first.map { .kund($0) } }
+            case .projekt(let p, let k):
+                try arkiv.taBort(projekt: p, hos: k)
+                if val?.projekt == p { val = .kund(k) }
+            }
+        } catch {
+            kastfel = error.localizedDescription
         }
     }
 
