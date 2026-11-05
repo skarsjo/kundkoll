@@ -78,16 +78,20 @@ actor Sammanfattare {
     /// Ett transkript kan vara långt. Det som betyder något för besluten sägs
     /// nästan alltid i klartext, så hela texten skickas — men kapad, så att en
     /// tre timmar lång inspelning inte spränger fönstret.
-    private let maxTecken = 60_000
+    ///
+    /// Taket är satt så att uppdraget ryms i Ollamas största fönster
+    /// (`fönster(för:)`) med svarsutrymmet kvar: 52 000 tecken blir högst
+    /// 26 000 tokens med två tecken per token.
+    static let maxTecken = 52_000
 
     func skriv(för inspelning: Inspelning, kund: String) async throws -> Mötessammanfattning {
         let rader = inspelning.yttranden.map { y in
             "[\(y.tidsstämpel)] \(y.etikett(inspelning.röstnamn, enspårig: inspelning.enspårig)): \(y.text)"
         }
         var text = rader.joined(separator: "\n")
-        if text.count > maxTecken {
+        if text.count > Self.maxTecken {
             // Slutet av ett möte bär besluten; början bär sammanhanget.
-            let halva = maxTecken / 2
+            let halva = Self.maxTecken / 2
             text = String(text.prefix(halva)) + "\n\n[…]\n\n" + String(text.suffix(halva))
         }
 
@@ -130,7 +134,7 @@ actor Sammanfattare {
             svarstext = try await chatt.fråga(uppdrag, om: kund, projekt: inspelning.projekt,
                                               träffar: [], historik: []).text
         }
-        guard let tolkad = Self.tolka(svarstext) else { throw Fel.otolkbart }
+        guard let tolkad = Self.tolka(svarstext) else { throw Fel.otolkbart(svarstext) }
         return tolkad
     }
 
@@ -151,13 +155,23 @@ actor Sammanfattare {
         return delar.url
     }
 
-    /// Fönstret räknas fram ur texten: svensk text blir ungefär en token per
-    /// tre tecken. Större fönster än nödvändigt kostar minne i onödan.
+    /// Fönstret räknas fram ur texten, med plats för svaret ovanpå.
+    /// Större fönster än nödvändigt kostar minne i onödan.
+    ///
+    /// Tidigare räknades tre tecken per token. Ett riktigt transkript har
+    /// korta repliker, och varje rad bär en tidsstämpel och ett namn: med
+    /// qwen3 blev 60 000 tecken 27 600 tokens, i ett fönster på 24 576.
+    /// Ollama kapade då uppdraget framifrån i tysthet — instruktionerna
+    /// och halva mötet försvann, och svaret gick inte att tolka. Två tecken
+    /// per token har marginal.
     static func fönster(för uppdrag: String) -> Int {
-        let behov = uppdrag.count / 3 + 4096
+        let behov = uppdrag.count / 2 + svarsutrymme
         let steg = 4096
         return min(max(8192, (behov + steg - 1) / steg * steg), 32768)
     }
+
+    /// Tokens som hålls fria för svaret.
+    static let svarsutrymme = 4096
 
     static let schema: [String: Any] = {
         let text: [String: Any] = ["type": "string"]
@@ -194,7 +208,7 @@ actor Sammanfattare {
             "think": false,
             "options": [
                 "num_ctx": fönster(för: uppdrag),
-                "num_predict": 4096,
+                "num_predict": svarsutrymme,
                 "temperature": 0.2,
             ] as [String: Any],
         ]
@@ -214,12 +228,23 @@ actor Sammanfattare {
         guard let http = svar as? HTTPURLResponse, http.statusCode == 200 else {
             throw Fel.frånOllama(String(data: data, encoding: .utf8) ?? "")
         }
+        return try svarstext(ur: data)
+    }
+
+    /// Texten i Ollamas svar. Ett svar som tog slut på utrymmet är kapat
+    /// mitt i sin JSON och sägs som det, inte som ett tolkningsfel.
+    static func svarstext(ur data: Data) throws -> String {
         struct Yttre: Decodable {
             struct M: Decodable { let content: String? }
-            let message: M
+            let message: M?
+            let done_reason: String?
         }
-        guard let text = (try? JSONDecoder().decode(Yttre.self, from: data))?.message.content,
-              !text.isEmpty else { throw Fel.otolkbart }
+        guard let yttre = try? JSONDecoder().decode(Yttre.self, from: data) else {
+            throw Fel.otolkbart(String(data: data, encoding: .utf8) ?? "")
+        }
+        let text = yttre.message?.content ?? ""
+        if yttre.done_reason == "length" { throw Fel.avklippt }
+        guard !text.isEmpty else { throw Fel.otolkbart("") }
         return text
     }
 
@@ -270,12 +295,20 @@ actor Sammanfattare {
     }
 
     enum Fel: LocalizedError {
-        case otolkbart
+        /// Med svaret, så att felet säger vad modellen faktiskt skrev.
+        case otolkbart(String)
+        case avklippt
         case nårInteOllama
         case frånOllama(String)
         var errorDescription: String? {
             switch self {
-            case .otolkbart: "Sammanfattningen gick inte att tolka."
+            case .otolkbart(let svar):
+                svar.isEmpty
+                    ? "Sammanfattningen gick inte att tolka: modellen svarade tomt."
+                    : "Sammanfattningen gick inte att tolka. Modellen svarade: «\(svar.prefix(160))»"
+            case .avklippt:
+                "Modellens svar tog slut på utrymmet innan sammanfattningen var klar. "
+                    + "Försök igen, eller välj en större modell för chatten."
             case .nårInteOllama: "Ollama svarar inte på 127.0.0.1:11434. Starta den med: ollama serve"
             case .frånOllama(let text): "Ollama svarade med ett fel: \(text.prefix(300))"
             }

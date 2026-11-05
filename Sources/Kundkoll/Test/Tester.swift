@@ -697,8 +697,23 @@ enum Tester {
                        "LM Studio går den vanliga vägen")
             Prov.kolla(Sammanfattare.ollamaAdress(för: Modellval(leverantör: .openrouter)) == nil,
                        "molnmodeller går den vanliga vägen")
-            Prov.lika(Sammanfattare.fönster(för: String(repeating: "a", count: 60_000)), 24576,
+            Prov.lika(Sammanfattare.fönster(för: String(repeating: "a", count: 60_000)), 32768,
                       "fönstret räcker för ett långt transkript")
+            // Ett möte på 70 minuter med korta repliker: 60 000 tecken blev
+            // 27 600 tokens med qwen3 och sprängde det gamla fönstret på 24 576.
+            let replik = "[00:41:07] Röst 3: Ja, precis, vi kör så.\n"
+            let uppdrag = String(repeating: replik, count: Sammanfattare.maxTecken / replik.count) + String(repeating: "x", count: 1_500)
+            let ram = Sammanfattare.fönster(för: uppdrag)
+            Prov.kolla(Double(uppdrag.count) / 2.2 + Double(Sammanfattare.svarsutrymme) <= Double(ram),
+                       "det kapade transkriptet ryms med svaret, även med 2,2 tecken per token")
+            Prov.kolla(ram <= 32768, "och fönstret stannar vid 32 768")
+            let avklippt = #"{"message":{"content":"{\"kärna\":\"Mötet handl"},"done_reason":"length"}"#
+            do { _ = try Sammanfattare.svarstext(ur: Data(avklippt.utf8)); Prov.kolla(false, "ett kapat svar upptäcks") }
+            catch { Prov.kolla("\(error)" == "\(Sammanfattare.Fel.avklippt)", "ett kapat svar sägs som kapat, inte otolkbart") }
+            let helt = #"{"message":{"content":"{\"kärna\":\"k\"}"},"done_reason":"stop"}"#
+            Prov.lika(try? Sammanfattare.svarstext(ur: Data(helt.utf8)), #"{"kärna":"k"}"#, "ett helt svar släpps igenom")
+            Prov.kolla(Sammanfattare.Fel.otolkbart("Jag kan inte").errorDescription?.contains("Jag kan inte") == true,
+                       "tolkningsfelet visar vad modellen svarade")
             Prov.lika(Sammanfattare.fönster(för: "kort"), 8192, "men aldrig mindre än 8192")
             let tom = Sammanfattare.tolka("""
             {"kärna": "", "beslut": [], "åtaganden": [], "öppet": []}
